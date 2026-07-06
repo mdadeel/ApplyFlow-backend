@@ -1,7 +1,7 @@
 // Prompt Builder for Smart Application
 
 import { readFileSync, existsSync } from 'fs'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import type { SmartApplicationInput } from './types'
 import type { CareerProfile } from '../career-data/profileService'
 
@@ -18,7 +18,52 @@ function loadPrompt(name: string): string {
   return readFileSync(join(PROMPTS_DIR, name), 'utf-8')
 }
 
-const SYSTEM_PROMPT = loadPrompt('system.md')
+function getAgentPromptsDir(): string {
+  let dir = process.cwd()
+  for (let i = 0; i < 5; i++) {
+    const candidate = join(dir, '.agents', 'prompts')
+    if (existsSync(candidate)) return candidate
+    dir = join(dir, '..')
+  }
+  // Fallback for test environment
+  const testCandidate = resolve(process.cwd(), '..', '..', '..', '..', '.agents', 'prompts')
+  if (existsSync(testCandidate)) return testCandidate
+  return ''
+}
+
+const AGENT_PROMPT_FILES = [
+  '01 Core System Rules.md',
+  '05 Resume Writing Rules.md',
+  '06 ATS Optimization Rules.md',
+  '08 Humanization Rules.md',
+  '09 Truth Validation Rules.md',
+  '10 Email Rules.md',
+  '11 Cover Letter Rules.md',
+]
+
+function loadAgentPrompt(name: string): string | null {
+  const dir = getAgentPromptsDir()
+  if (!dir) return null
+  const path = join(dir, name)
+  if (!existsSync(path)) return null
+  return readFileSync(path, 'utf-8')
+}
+
+function buildSystemPrompt(): string {
+  const parts: string[] = [loadPrompt('system.md')]
+
+  // Append agent prompt rules
+  for (const file of AGENT_PROMPT_FILES) {
+    const content = loadAgentPrompt(file)
+    if (content) {
+      parts.push(`\n## ${file.replace('.md', '')}\n${content}`)
+    }
+  }
+
+  return parts.join('\n\n')
+}
+
+const SYSTEM_PROMPT = buildSystemPrompt()
 const GENERATION_PROMPT_TEMPLATE = loadPrompt('combined-generation.md')
 
 interface PromptVariables {

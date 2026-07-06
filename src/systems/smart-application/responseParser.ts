@@ -145,19 +145,27 @@ export class ResponseParser {
   }
 
   static calculateScores(output: SmartApplicationOutput): { ats: number; match: number; overall: number } {
-    const { analysis, resume, validationHints } = output
+    const { analysis, resume } = output
 
-    // ATS score: percentage of atsKeywordsToInclude found in resume markdown
+    // ATS score: percentage of actual JD keywords found in resume markdown
+    // Uses analysis.atsKeywords + requiredSkills (extracted from JD), NOT AI-suggested keywords
     const resumeText = resume.markdown.toLowerCase()
-    const atsKeywords = validationHints.atsKeywordsToInclude.map(k => k.toLowerCase())
-    const atsFound = atsKeywords.filter(k => resumeText.includes(k)).length
-    const atsScore = atsKeywords.length > 0 ? Math.round((atsFound / atsKeywords.length) * 100) : 100
+    const jdKeywords = [
+      ...(analysis.atsKeywords || []),
+      ...(analysis.requiredSkills || []),
+    ]
+    const uniqueKeywords = [...new Set(jdKeywords.map(k => k.toLowerCase()))]
 
-    // Match score: from analysis.matchPercent
+    const atsFound = uniqueKeywords.filter(k => resumeText.includes(k)).length
+    const atsScore = uniqueKeywords.length > 0
+      ? Math.round((atsFound / uniqueKeywords.length) * 100)
+      : 100
+
+    // Match score: from analysis.matchPercent (AI's assessment of profile-vs-JD fit)
     const matchScore = analysis.matchPercent
 
-    // Overall: weighted average
-    const overall = Math.round(atsScore * 0.4 + matchScore * 0.6)
+    // Overall: weighted average — ATS and match equally weighted now
+    const overall = Math.round(atsScore * 0.5 + matchScore * 0.5)
 
     return { ats: atsScore, match: matchScore, overall }
   }

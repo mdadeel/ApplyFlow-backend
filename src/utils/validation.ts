@@ -62,6 +62,32 @@ export const addTimelineEntrySchema = z.object({
   notes: z.string().optional(),
 })
 
+// ── S4 Task Tracker ─────────────────────────────────────────────────
+
+const trackerTaskStatus = z.enum(['todo', 'in_progress', 'done'])
+const trackerTaskPriority = z.enum(['low', 'medium', 'high'])
+
+export const createTaskSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(200),
+  description: z.string().max(5000).optional(),
+  status: trackerTaskStatus.optional(),
+  priority: trackerTaskPriority.optional(),
+  dueDate: z.coerce.date().optional(),
+})
+
+export const updateTaskSchema = z
+  .object({
+    title: z.string().min(1).max(200).optional(),
+    description: z.string().max(5000).optional(),
+    status: trackerTaskStatus.optional(),
+    priority: trackerTaskPriority.optional(),
+    dueDate: z.coerce.date().optional(),
+  })
+  .refine(
+    (data) => Object.keys(data).length > 0,
+    { message: 'At least one field must be provided to update a task' },
+  )
+
 // ── Job Intelligence ────────────────────────────────────────────────
 
 export const analyzeJdSchema = z.object({

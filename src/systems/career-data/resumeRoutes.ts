@@ -7,6 +7,7 @@ import { sendSuccess } from '../../utils/response'
 import { extractTextFromDOCX } from './docxParser'
 import { extractTextFromPDF } from './pdfParser'
 import { extractProfileFromPDF } from './pdfExtractor'
+import { saveExtractedProfile } from './profileService'
 
 const router = Router()
 router.use(sessionGuard)
@@ -68,6 +69,9 @@ router.post(
       const message = err instanceof Error ? err.message : 'AI extraction failed'
       throw new AppError(500, `AI extraction failed: ${message}`)
     }
+
+    // Populate career profile collections for generation pipeline
+    await saveExtractedProfile(req.userId, extracted)
 
     // Build content object matching UploadedResume schema
     const content = {

@@ -89,6 +89,44 @@ export interface CustomSection {
   confidence: 'High' | 'Medium' | 'Low'
 }
 
+export interface ExtractedAward {
+  title: string
+  issuer: string
+  date?: string
+  description?: string
+  url?: string
+}
+
+export interface ExtractedPublication {
+  title: string
+  publisher: string
+  date?: string
+  url?: string
+  description?: string
+  authors?: string[]
+}
+
+export interface ExtractedVolunteering {
+  organization: string
+  role: string
+  startDate?: string
+  endDate?: string
+  current: boolean
+  description?: string
+  technologies?: string[]
+  url?: string
+}
+
+export interface ExtractedLanguage {
+  name: string
+  proficiency: 'Native' | 'Fluent' | 'Advanced' | 'Intermediate' | 'Basic'
+}
+
+export interface ExtractedInterest {
+  name: string
+  category?: string
+}
+
 export interface ExtractedProfile {
   personal?: {
     name?: string
@@ -104,6 +142,11 @@ export interface ExtractedProfile {
   skills: ExtractedSkill[]
   education: ExtractedEducation[]
   certificates: ExtractedCertificate[]
+  awards?: ExtractedAward[]
+  publications?: ExtractedPublication[]
+  volunteering?: ExtractedVolunteering[]
+  languages?: ExtractedLanguage[]
+  interests?: ExtractedInterest[]
   customSections?: CustomSection[]
   links?: ExtractedLink[]
   documentStructure?: {
@@ -198,6 +241,21 @@ REQUIRED JSON STRUCTURE:
   ],
   "certificates": [
     { "name": "string", "issuer": "string", "date": "string", "url": "string" }
+  ],
+  "awards": [
+    { "title": "string", "issuer": "string", "date": "string", "description": "string", "url": "string" }
+  ],
+  "publications": [
+    { "title": "string", "publisher": "string", "date": "string", "url": "string", "description": "string", "authors": ["string"] }
+  ],
+  "volunteering": [
+    { "organization": "string", "role": "string", "startDate": "string", "endDate": "string", "current": boolean, "description": "string", "technologies": ["string"] }
+  ],
+  "languages": [
+    { "name": "string", "proficiency": "Native|Fluent|Advanced|Intermediate|Basic" }
+  ],
+  "interests": [
+    { "name": "string", "category": "string" }
   ]
 }
 
@@ -337,6 +395,76 @@ ${trimmed}`
     })
     .filter((x): x is ExtractedCertificate => x !== null)
 
+  const awards: ExtractedAward[] = asArray(parsed.awards)
+    .map((a: any) => {
+      const title = asString(a.title).trim()
+      if (!title) return null
+      return {
+        title,
+        issuer: asString(a.issuer).trim() || 'Unknown',
+        date: asString(a.date) || undefined,
+        description: asString(a.description) || undefined,
+        url: asString(a.url) || undefined,
+      } as ExtractedAward
+    })
+    .filter((x): x is ExtractedAward => x !== null)
+
+  const publications: ExtractedPublication[] = asArray(parsed.publications)
+    .map((p: any) => {
+      const title = asString(p.title).trim()
+      if (!title) return null
+      return {
+        title,
+        publisher: asString(p.publisher).trim() || 'Unknown',
+        date: asString(p.date) || undefined,
+        url: asString(p.url) || undefined,
+        description: asString(p.description) || undefined,
+        authors: asStringArray(p.authors),
+      } as ExtractedPublication
+    })
+    .filter((x): x is ExtractedPublication => x !== null)
+
+  const volunteering: ExtractedVolunteering[] = asArray(parsed.volunteering)
+    .map((v: any) => {
+      const org = asString(v.organization).trim()
+      const role = asString(v.role).trim()
+      if (!org && !role) return null
+      return {
+        organization: org,
+        role,
+        startDate: asString(v.startDate) || undefined,
+        endDate: asString(v.endDate) || undefined,
+        current: Boolean(v.current),
+        description: asString(v.description) || undefined,
+        technologies: asStringArray(v.technologies),
+        url: asString(v.url) || undefined,
+      } as ExtractedVolunteering
+    })
+    .filter((x): x is ExtractedVolunteering => x !== null)
+
+  const languages: ExtractedLanguage[] = asArray(parsed.languages)
+    .map((l: any) => {
+      const name = asString(l.name).trim()
+      if (!name) return null
+      const validProfs = ['Native', 'Fluent', 'Advanced', 'Intermediate', 'Basic']
+      return {
+        name,
+        proficiency: (validProfs.includes(l.proficiency) ? l.proficiency : 'Intermediate') as ExtractedLanguage['proficiency'],
+      } as ExtractedLanguage
+    })
+    .filter((x): x is ExtractedLanguage => x !== null)
+
+  const interests: ExtractedInterest[] = asArray(parsed.interests)
+    .map((i: any) => {
+      const name = asString(i.name).trim()
+      if (!name) return null
+      return {
+        name,
+        category: asString(i.category) || undefined,
+      } as ExtractedInterest
+    })
+    .filter((x): x is ExtractedInterest => x !== null)
+
   const customSections: CustomSection[] = asArray(parsed.customSections)
     .map((s: any) => {
       const title = asString(s.title).trim()
@@ -373,6 +501,11 @@ ${trimmed}`
     skills, 
     education, 
     certificates,
+    awards,
+    publications,
+    volunteering,
+    languages,
+    interests,
     customSections,
     links: Array.isArray(parsed.links) ? parsed.links : undefined,
     documentStructure

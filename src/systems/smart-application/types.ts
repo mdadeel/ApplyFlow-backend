@@ -45,6 +45,7 @@ export interface ResumeExperienceItem {
   startDate: string
   endDate: string
   bullets: string[]
+  technologies?: string[]
 }
 
 export interface ResumeProjectItem {
@@ -103,6 +104,24 @@ export interface SmartApplicationOutput {
   email: EmailOutput
   coverLetter: string
   validationHints: ValidationHintsOutput
+}
+
+export interface GenerationConfig {
+  maxRetries: number
+  minConfidence: number
+  minATSScore: number
+  enforceTruthGate: boolean
+  runRecruiterReview: boolean
+  runEngineeringReview: boolean
+}
+
+export const DEFAULT_GENERATION_CONFIG: GenerationConfig = {
+  maxRetries: 3,
+  minConfidence: 70,
+  minATSScore: 60,
+  enforceTruthGate: true,
+  runRecruiterReview: true,
+  runEngineeringReview: true,
 }
 
 export interface SmartApplicationResult {

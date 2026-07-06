@@ -200,6 +200,52 @@ router.post(
 )
 
 /**
+ * POST /api/v1/applications/ai-create
+ * Accept raw text — AI auto-detects 1 or multiple JDs and processes them
+ */
+router.post(
+  '/ai-create',
+  sessionGuard,
+  upload.single('masterCV'),
+  async (req: Request, res: Response) => {
+    try {
+      const userId = req.userId!
+      const jdText = req.body.jdText
+      const company = req.body.company
+      const role = req.body.role
+      const resumeId = req.body.resumeId
+
+      if (!jdText || typeof jdText !== 'string') {
+        throw new AppError(400, 'jdText is required')
+      }
+      if (jdText.trim().length < 50) {
+        throw new AppError(400, 'Job description must be at least 50 characters')
+      }
+
+      // Get master CV text from file, body text, or uploaded resume
+      const masterCVText = await resolveMasterCVText(req, userId)
+
+      const service = getSmartApplicationService()
+
+      // Let the AI split and create — it returns either a single result or bulk results
+      const result = await service.createFromRawText({
+        userId,
+        jdText: jdText.trim(),
+        company: company || undefined,
+        role: role || undefined,
+        masterCVText,
+      })
+
+      sendSuccess(res, result, 201)
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      console.error('AI create error:', err)
+      throw new AppError(500, 'Failed to process job descriptions')
+    }
+  }
+)
+
+/**
  * GET /api/v1/applications/:id/export-all
  * Export all formats for an application
  */

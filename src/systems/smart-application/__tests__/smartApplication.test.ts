@@ -279,19 +279,19 @@ describe('ResponseParser.calculateScores', () => {
     expect(scores.overall).toBeGreaterThanOrEqual(0)
     expect(scores.overall).toBeLessThanOrEqual(100)
 
-    // matchPercent=80 in fixture, both atsKeywords appear in resume markdown → ats=100
+    // matchPercent=80, both atsKeywords+requiredSkills in resume → ats=100
     expect(scores.match).toBe(80)
     expect(scores.ats).toBe(100)
-    // overall = 100*0.4 + 80*0.6 = 88
-    expect(scores.overall).toBe(88)
+    // overall = 100*0.5 + 80*0.5 = 90
+    expect(scores.overall).toBe(90)
   })
 
-  it('handles empty atsKeywordsToInclude (returns ats=100)', () => {
+  it('handles empty JD keywords (returns ats=100)', () => {
     const output = buildValidOutput({
-      validationHints: {
-        atsKeywordsToInclude: [],
-        truthFlags: [],
-        humanizationTips: [],
+      analysis: {
+        ...buildValidOutput().analysis,
+        atsKeywords: [],
+        requiredSkills: [],
       },
     })
     const scores = ResponseParser.calculateScores(output)

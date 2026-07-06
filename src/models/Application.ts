@@ -21,6 +21,21 @@ export interface ITask {
   notes?: string
 }
 
+export type TrackerTaskStatus = 'todo' | 'in_progress' | 'done'
+export type TrackerTaskPriority = 'low' | 'medium' | 'high'
+
+export interface ITrackerTask {
+  _id: mongoose.Types.ObjectId
+  title: string
+  description?: string
+  status: TrackerTaskStatus
+  priority: TrackerTaskPriority
+  dueDate?: Date
+  completedAt?: Date
+  createdAt: Date
+  updatedAt: Date
+}
+
 export interface IApplication extends Document {
   userId: string
   company: string
@@ -43,6 +58,22 @@ export interface IApplication extends Document {
   tasks?: ITask[]
   isBulkGenerated?: boolean
   bulkJobId?: string
+
+  // S4 Task Tracker (free-form per-application tasks; distinct from workflow `tasks`)
+  trackerTasks?: ITrackerTask[]
+
+  // Truth audit trail
+  truthProvenance?: Array<{
+    claim: string
+    sourceType: 'experience' | 'project' | 'skill' | 'education' | 'certificate'
+    sourceId: string
+    field: string
+  }>
+  refinementHistory?: Array<{
+    pass: number
+    changes: string[]
+    timestamp: Date
+  }>
 }
 
 const applicationSchema = new Schema<IApplication>({
@@ -93,6 +124,35 @@ const applicationSchema = new Schema<IApplication>({
   }],
   isBulkGenerated: { type: Boolean, default: false },
   bulkJobId: String,
+  // Truth audit trail
+  truthProvenance: [{
+    claim: String,
+    sourceType: { type: String, enum: ['experience', 'project', 'skill', 'education', 'certificate'] },
+    sourceId: Schema.Types.ObjectId,
+    field: String,
+  }],
+  refinementHistory: [{
+    pass: Number,
+    changes: [{ type: String }],
+    timestamp: { type: Date, default: Date.now },
+  }],
+  // S4 Task Tracker sub-document array
+  trackerTasks: [{
+    title: { type: String, required: true },
+    description: { type: String },
+    status: {
+      type: String,
+      enum: ['todo', 'in_progress', 'done'],
+      default: 'todo',
+    },
+    priority: {
+      type: String,
+      enum: ['low', 'medium', 'high'],
+      default: 'medium',
+    },
+    dueDate: { type: Date },
+    completedAt: { type: Date },
+  }],
 }, { timestamps: true })
 
 // Compound index for folder queries

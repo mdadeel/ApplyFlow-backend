@@ -13,7 +13,18 @@ import {
   updateApplicationSchema,
   addTimelineEntrySchema,
   analyzeJdSchema,
+  createTaskSchema,
+  updateTaskSchema,
 } from '../../utils/validation'
+import {
+  getTasks,
+  createTask,
+  updateTask,
+  deleteTask,
+  NotFoundError as TaskServiceNotFound,
+  TaskNotFoundError,
+  TaskLimitError,
+} from './taskService'
 
 const router = Router()
 router.use(sessionGuard)
@@ -122,6 +133,67 @@ router.post('/:id/timeline', validate(addTimelineEntrySchema), async (req: Reque
 router.get('/:id/versions', async (req: Request, res: Response) => {
   const versions = await ResumeVersion.find({ applicationId: req.params.id, userId: req.userId }).sort({ version: -1 })
   sendSuccess(res, versions)
+})
+
+// ── S4 Task Tracker ─────────────────────────────────────────────────
+// All routes scope to the owning application; sub-document lookups
+// use the filtered document so other users' tasks are unreachable.
+
+router.get('/:id/tasks', async (req: Request, res: Response) => {
+  try {
+    const tasks = await getTasks(String(req.params.id), req.userId)
+    sendSuccess(res, tasks)
+  } catch (err) {
+    if (err instanceof TaskServiceNotFound) {
+      throw new AppError(404, err.message)
+    }
+    throw err
+  }
+})
+
+router.post('/:id/tasks', validate(createTaskSchema), async (req: Request, res: Response) => {
+  try {
+    const task = await createTask(String(req.params.id), req.userId, req.body)
+    sendSuccess(res, task, 201)
+  } catch (err) {
+    if (err instanceof TaskServiceNotFound) {
+      throw new AppError(404, err.message)
+    }
+    if (err instanceof TaskLimitError) {
+      throw new AppError(400, err.message, { limit: err.limit })
+    }
+    throw err
+  }
+})
+
+router.put('/:id/tasks/:taskId', validate(updateTaskSchema), async (req: Request, res: Response) => {
+  try {
+    const task = await updateTask(String(req.params.id), req.userId, String(req.params.taskId), req.body)
+    sendSuccess(res, task)
+  } catch (err) {
+    if (err instanceof TaskServiceNotFound) {
+      throw new AppError(404, err.message)
+    }
+    if (err instanceof TaskNotFoundError) {
+      throw new AppError(404, err.message)
+    }
+    throw err
+  }
+})
+
+router.delete('/:id/tasks/:taskId', async (req: Request, res: Response) => {
+  try {
+    await deleteTask(String(req.params.id), req.userId, String(req.params.taskId))
+    sendSuccess(res, { ok: true })
+  } catch (err) {
+    if (err instanceof TaskServiceNotFound) {
+      throw new AppError(404, err.message)
+    }
+    if (err instanceof TaskNotFoundError) {
+      throw new AppError(404, err.message)
+    }
+    throw err
+  }
 })
 
 export default router

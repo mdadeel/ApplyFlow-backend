@@ -8,12 +8,16 @@ import type { SmartApplicationInput, SmartApplicationOutput, SmartApplicationRes
 import { getFullProfile } from '../../systems/career-data/profileService'
 import type { CareerProfile } from '../career-data/profileService'
 import { getAIProvider } from '../ai'
+import { validateTruth, stripUnverifiableClaims } from '../document-validation/truthGate'
+import { RefinementService } from './refinementService'
 
 export class SmartApplicationService {
   private aiProvider: AIProvider
+  private refinementService: RefinementService
 
   constructor(aiProvider: AIProvider) {
     this.aiProvider = aiProvider
+    this.refinementService = new RefinementService()
   }
 
   async createApplication(input: SmartApplicationInput): Promise<SmartApplicationResult> {
@@ -39,6 +43,42 @@ export class SmartApplicationService {
 
       output = ResponseParser.parseSingle(rawResponse)
       console.log(`[SmartApplication] Parsed AI response.`)
+
+      // Truth gate: validate every claim against career profile DB
+      console.log(`[SmartApplication] Running truth gate...`)
+      const truthResult = validateTruth(output, careerProfile)
+
+      if (truthResult.unverifiable.length > 0) {
+        console.warn(`[SmartApplication] Truth gate found ${truthResult.unverifiable.length} unverifiable claims:`)
+        for (const issue of truthResult.unverifiable) {
+          console.warn(`  - [${issue.location}] ${issue.claim}: ${issue.reason}`)
+        }
+        output = stripUnverifiableClaims(output, truthResult.unverifiable)
+        // Add truth flags to validation hints
+        output.validationHints.truthFlags = [
+          ...output.validationHints.truthFlags,
+          ...truthResult.unverifiable.map(u => `${u.reason} (at ${u.location})`)
+        ]
+        console.log(`[SmartApplication] Stripped unverifiable claims.`)
+      }
+
+      // Pass 2: Humanization refinement (only if below threshold)
+      console.log(`[SmartApplication] Running humanization refinement...`)
+      const { output: humanized, changes: humanChanges, humanizationScore } = await this.refinementService.refineHumanization(this.aiProvider, output)
+      output = humanized
+      if (humanChanges.length > 0) {
+        console.log(`[SmartApplication] Humanization pass made ${humanChanges.length} change(s):`, humanChanges)
+      }
+      console.log(`[SmartApplication] Humanization score: ${humanizationScore}`)
+
+      // Pass 3: ATS gap fill (only if below threshold)
+      console.log(`[SmartApplication] Running ATS gap fill...`)
+      const { output: atsFilled, changes: atsChanges, atsScore } = await this.refinementService.fillATSGaps(this.aiProvider, output, careerProfile)
+      output = atsFilled
+      if (atsChanges.length > 0) {
+        console.log(`[SmartApplication] ATS refinement made ${atsChanges.length} change(s):`, atsChanges)
+      }
+      console.log(`[SmartApplication] ATS keyword coverage: ${atsScore}%`)
     } catch (err) {
       console.warn(`[SmartApplication] AI generation failed, using fallback:`, (err as Error).message)
       output = this.buildFallbackOutput(input, careerProfile)
@@ -70,6 +110,94 @@ export class SmartApplicationService {
         scores,
       }
     }
+  }
+
+  /**
+   * Create application(s) from raw text — AI auto-detects 1 or multiple JDs.
+   */
+  async createFromRawText(input: {
+    userId: string
+    jdText: string
+    company?: string
+    role?: string
+    masterCVText?: string
+  }): Promise<
+    SmartApplicationResult |
+    { jobId: string; results: Array<SmartApplicationResult | { error: string; company: string; role: string }> }
+  > {
+    const careerProfile = await getFullProfile(input.userId)
+    if (!careerProfile) {
+      throw new Error('Career profile not found. Please upload a master CV first.')
+    }
+
+    // Step 1: Use AI to split raw text into individual JDs
+    let jds: Array<{ company: string; role: string; jdText: string }>
+
+    try {
+      const splitPrompt = `You are an expert job description parser. Analyze the following text and split it into individual job descriptions.
+
+For each job description, extract:
+- company: The company name (if mentioned, otherwise "Unknown Company")
+- role: The job title / role (if mentioned, otherwise "Unknown Role")
+- jdText: The full text of that job description
+
+If the text contains only ONE job description, return an array with one item.
+If it contains MULTIPLE job descriptions, return an array with each one separately.
+Use natural boundaries (company names, role titles, horizontal rules, double newlines, etc.) to separate them.
+
+Return ONLY valid JSON in this exact format:
+{"jds": [{"company": "...", "role": "...", "jdText": "..."}]}
+
+Do not truncate or summarize the jdText — preserve the full text of each description.
+
+Text to analyze:
+${input.jdText}`
+
+      const raw = await this.aiProvider.generateText(splitPrompt, 0.2, true)
+      let parsed: any
+      try {
+        parsed = JSON.parse(raw)
+      } catch {
+        const match = raw.match(/\{[\s\S]*\}/)
+        if (match) parsed = JSON.parse(match[0])
+        else throw new Error('Could not parse AI response')
+      }
+
+      const rawJds = Array.isArray(parsed?.jds) ? parsed.jds : []
+      jds = rawJds
+        .filter((j: any) => j && typeof j.jdText === 'string' && j.jdText.trim().length >= 50)
+        .map((j: any) => ({
+          company: typeof j.company === 'string' ? j.company.trim() : 'Unknown Company',
+          role: typeof j.role === 'string' ? j.role.trim() : 'Unknown Role',
+          jdText: j.jdText.trim(),
+        }))
+
+      // Fallback: if AI returned nothing useful, treat whole text as one JD
+      if (jds.length === 0) {
+        jds = [{ company: input.company || 'Target Company', role: input.role || 'Software Engineer', jdText: input.jdText }]
+      }
+    } catch {
+      // AI splitting failed — treat as single JD
+      jds = [{ company: input.company || 'Target Company', role: input.role || 'Software Engineer', jdText: input.jdText }]
+    }
+
+    // Step 2: Process — single JD or bulk
+    if (jds.length === 1) {
+      const jd = jds[0]
+      return this.createApplication({
+        userId: input.userId,
+        jdText: jd.jdText,
+        company: jd.company,
+        role: jd.role,
+        masterCVText: input.masterCVText,
+      })
+    }
+
+    return this.createBulkApplications({
+      userId: input.userId,
+      jds,
+      masterCVText: input.masterCVText,
+    })
   }
 
   private buildFallbackOutput(input: SmartApplicationInput, profile: CareerProfile): SmartApplicationOutput {

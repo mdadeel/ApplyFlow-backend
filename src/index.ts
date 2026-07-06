@@ -80,6 +80,9 @@ app.use('/api/learning', learningRoutes)
 import notificationRoutes from './systems/notifications/routes'
 app.use('/api/notifications', notificationRoutes)
 
+import communityRoutes from './systems/community/routes'
+app.use('/api/v1/community', communityRoutes)
+
 async function start() {
   try {
     await mongoose.connect(config.mongodbUri, { serverSelectionTimeoutMS: 3000 })
