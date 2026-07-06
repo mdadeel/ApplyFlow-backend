@@ -22,8 +22,13 @@ function extensionFor(format: string): string {
 }
 
 router.post('/resume', validate(exportResumeSchema), async (req: Request, res: Response) => {
-  const { resumeVersionId, format = 'pdf', company = '', role = '' } = req.body
-  const version = await ResumeVersion.findOne({ _id: resumeVersionId, userId: req.userId })
+  const { resumeVersionId, applicationId, format = 'pdf', company = '', role = '' } = req.body
+  let version
+  if (resumeVersionId) {
+    version = await ResumeVersion.findOne({ _id: resumeVersionId, userId: req.userId })
+  } else if (applicationId) {
+    version = await ResumeVersion.findOne({ applicationId, userId: req.userId }).sort({ createdAt: -1 })
+  }
   if (!version) throw new AppError(404, 'Resume version not found')
   const report = await ValidationReport.findOne({ resumeVersionId, userId: req.userId }).sort({ createdAt: -1 })
   if (report?.blocked) throw new AppError(400, 'Export blocked: validation failed', { report })

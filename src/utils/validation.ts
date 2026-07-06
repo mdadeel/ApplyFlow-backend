@@ -159,10 +159,13 @@ export const generateStrategySchema = z.object({
 // ── Export ──────────────────────────────────────────────────────────
 
 export const exportResumeSchema = z.object({
-  resumeVersionId: z.string().min(1, 'resumeVersionId is required'),
+  resumeVersionId: z.string().optional(),
+  applicationId: z.string().optional(),
   format: z.enum(['pdf', 'docx', 'md']).optional(),
   company: z.string().optional(),
   role: z.string().optional(),
+}).refine((data) => data.resumeVersionId || data.applicationId, {
+  message: 'Either resumeVersionId or applicationId is required',
 })
 
 export const exportEmailSchema = z.object({

@@ -68,6 +68,9 @@ app.use('/api/validate', validationRoutes)
 import exportRoutes from './systems/export/routes'
 app.use('/api/export', exportRoutes)
 
+import exportPersistenceRoutes from './systems/export/persistence'
+app.use('/api/exports', exportPersistenceRoutes)
+
 import interviewRoutes from './systems/interview-intelligence/routes'
 app.use('/api/interview', interviewRoutes)
 
