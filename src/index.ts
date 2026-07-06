@@ -86,6 +86,26 @@ app.use('/api/notifications', notificationRoutes)
 import communityRoutes from './systems/community/routes'
 app.use('/api/v1/community', communityRoutes)
 
+import opportunityRoutes from './systems/opportunity/routes'
+app.use('/api/opportunities', opportunityRoutes)
+
+import contributionRoutes from './systems/contribution/routes'
+app.use('/api/opportunities/:opportunityId/contributions', contributionRoutes)
+
+import workspaceRoutes from './systems/workspace/routes'
+app.use('/api/workspaces', workspaceRoutes)
+
+import recommenderRoutes from './systems/recommender/routes'
+app.use('/api', recommenderRoutes)
+
+import communityAnalyticsRoutes from './systems/community-analytics/routes'
+app.use('/api/analytics/community', communityAnalyticsRoutes)
+
+import { start as startIngestionWorker } from './workers/opportunity-ingestion'
+import { start as startEmbeddingWorker } from './workers/embedding-refresh'
+import { start as startMatchWorker } from './workers/match-refresh'
+import { start as startDeadlineWorker } from './workers/deadline-alert'
+
 async function start() {
   try {
     await mongoose.connect(config.mongodbUri, { serverSelectionTimeoutMS: 3000 })
@@ -96,6 +116,11 @@ async function start() {
 
   const server = app.listen(config.port, () => {
     console.log(`Server running on port ${config.port}`)
+    startIngestionWorker()
+    startEmbeddingWorker()
+    startMatchWorker()
+    startDeadlineWorker()
+    console.log('Background workers started')
   })
   // Increase timeout to 15 minutes to allow for long LLM generation requests
   server.timeout = 900000;

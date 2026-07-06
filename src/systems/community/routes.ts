@@ -48,6 +48,7 @@ const listTemplatesQuerySchema = z.object({
 const listReferralsQuerySchema = z.object({
   company: z.string().optional(),
   status: z.enum(['open', 'claimed', 'closed', 'expired']).optional(),
+  opportunityId: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
 })
 

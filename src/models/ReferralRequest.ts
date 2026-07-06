@@ -14,6 +14,7 @@ export interface IReferralRequest extends Document {
   responderId?: string
   responseNote?: string
   expiresAt?: Date
+  opportunityId?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -35,6 +36,7 @@ const referralRequestSchema = new Schema<IReferralRequest>(
     responderId: { type: String, default: undefined },
     responseNote: { type: String, maxlength: 5000 },
     expiresAt: { type: Date, default: undefined },
+    opportunityId: { type: String, index: true, default: undefined },
   },
   { timestamps: true },
 )

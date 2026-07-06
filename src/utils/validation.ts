@@ -28,6 +28,12 @@ export const preferencesSchema = z.object({
   defaultExportFormat: z.enum(['pdf', 'docx', 'md']).optional(),
   notifications: z.record(z.boolean()).optional(),
   apiKeys: z.record(z.string()).optional(),
+  twoFactorEnabled: z.boolean().optional(),
+})
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters'),
 })
 
 export const saveApiKeySchema = z.object({

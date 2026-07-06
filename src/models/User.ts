@@ -9,6 +9,7 @@ export interface IUserPreferences {
   defaultExportFormat: 'pdf' | 'docx' | 'md'
   notifications?: Record<string, boolean>
   apiKeys?: Record<string, string>
+  twoFactorEnabled?: boolean
 }
 
 export interface IUser extends Document {
@@ -27,6 +28,18 @@ export interface IUser extends Document {
   linkedIn?: string
   github?: string
   connectedProviders: string[]
+  communityReputation: number
+  totalContributions: number
+  preferredLocations: string[]
+  preferredRoles: string[]
+  minSalary?: number
+  salaryCurrency: string
+  openToRemote: boolean
+  openToRelocation: boolean
+  skills: string[]
+  yearsOfExperience?: number
+  currentRole?: string
+  currentCompany?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -40,6 +53,7 @@ const userPreferencesSchema = new Schema<IUserPreferences>({
   defaultExportFormat: { type: String, enum: ['pdf', 'docx', 'md'], default: 'pdf' },
   notifications: { type: Schema.Types.Mixed, default: () => ({}) },
   apiKeys: { type: Schema.Types.Mixed, default: () => ({}) },
+  twoFactorEnabled: { type: Boolean, default: false },
 }, { _id: false })
 
 const userSchema = new Schema<IUser>({
@@ -58,6 +72,18 @@ const userSchema = new Schema<IUser>({
   linkedIn: { type: String, trim: true },
   github: { type: String, trim: true },
   connectedProviders: { type: [String], default: () => [] },
+  communityReputation: { type: Number, default: 0 },
+  totalContributions: { type: Number, default: 0 },
+  preferredLocations: { type: [String], default: () => [] },
+  preferredRoles: { type: [String], default: () => [] },
+  minSalary: { type: Number, min: 0 },
+  salaryCurrency: { type: String, default: 'USD', maxlength: 3 },
+  openToRemote: { type: Boolean, default: true },
+  openToRelocation: { type: Boolean, default: false },
+  skills: { type: [String], default: () => [] },
+  yearsOfExperience: { type: Number, min: 0 },
+  currentRole: { type: String, trim: true, maxlength: 200 },
+  currentCompany: { type: String, trim: true, maxlength: 200 },
 }, { timestamps: true })
 
 userSchema.set('toJSON', {

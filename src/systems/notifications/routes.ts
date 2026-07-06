@@ -39,6 +39,14 @@ router.put('/:id/dismiss', async (req: Request, res: Response) => {
   sendSuccess(res, item)
 })
 
+// POST /api/notifications — create a notification (internal/system use)
+router.post('/', async (req: Request, res: Response) => {
+  const { type, title, message, link } = req.body
+  if (!type || !title || !message) throw new AppError(400, 'type, title, message required')
+  const item = await Notification.create({ userId: req.userId, type, title, message, link })
+  sendSuccess(res, item, 201)
+})
+
 // PUT /api/notifications/read-all — mark every active notification as read
 router.put('/read-all', async (req: Request, res: Response) => {
   await Notification.updateMany(

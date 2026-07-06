@@ -29,6 +29,7 @@ export const referralCreateSchema = z.object({
   location: z.string().max(200).optional(),
   message: z.string().min(10).max(5000),
   jdUrl: z.string().url().max(500).optional(),
+  opportunityId: z.string().max(50).optional(),
   tags: z.array(z.string().min(1).max(30)).max(10).optional().default([]),
 })
 export type ReferralCreateInput = z.infer<typeof referralCreateSchema>
@@ -130,6 +131,7 @@ export async function downloadTemplate(
 export interface ListReferralsOpts {
   company?: string
   status?: ReferralStatus
+  opportunityId?: string
   limit?: number
 }
 
@@ -139,6 +141,7 @@ export async function listReferrals(
   const query: Record<string, unknown> = {}
   if (opts.company) query.company = opts.company
   if (opts.status) query.status = opts.status
+  if (opts.opportunityId) query.opportunityId = opts.opportunityId
 
   return ReferralRequest.find(query)
     .sort({ createdAt: -1 })
@@ -157,6 +160,7 @@ export async function createReferralRequest(
     location: input.location,
     message: input.message,
     jdUrl: input.jdUrl,
+    opportunityId: input.opportunityId,
     tags: input.tags,
     status: 'open',
   })

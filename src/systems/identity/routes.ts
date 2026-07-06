@@ -1,6 +1,13 @@
 import { Router, Request, Response } from 'express'
 import { User } from '../../models/User'
 import { Notification } from '../../models/Notification'
+import { Application } from '../../models/Application'
+import { JDAnalysis } from '../../models/JDAnalysis'
+import { ResumeVersion } from '../../models/ResumeVersion'
+import { InterviewPrep } from '../../models/InterviewPrep'
+import { UploadedResume } from '../../models/UploadedResume'
+import { ValidationReport } from '../../models/ValidationReport'
+import { ExportRecord } from '../../models/ExportRecord'
 import { hashPassword, verifyPassword, generateToken, SESSION_COOKIE, sessionCookieOptions } from './credentialManager'
 import { verifyGoogleToken, verifyGithubCode, verifyLinkedInCode } from './oauthGateway'
 import { sessionGuard } from './sessionGuard'
@@ -12,10 +19,12 @@ import {
   githubAuthSchema,
   preferencesSchema,
   saveApiKeySchema,
+  changePasswordSchema,
 } from '../../utils/validation'
 import { AppError } from '../../middleware/errorHandler'
 import { sendSuccess } from '../../utils/response'
 import { config } from '../../config'
+import { validate } from '../../middleware/validate'
 
 const router = Router()
 
@@ -184,9 +193,57 @@ router.put('/preferences', sessionGuard, async (req: Request, res: Response) => 
 router.post('/api-key', sessionGuard, async (req: Request, res: Response) => {
   const data = saveApiKeySchema.parse(req.body)
   const existing = await getPreferences(req.userId)
-  const mergedKeys: Record<string, string> = { ...(existing.apiKeys ?? {}), [data.provider]: data.key }
+  const mergedKeys: Record<string, string> = { ...existing.apiKeys, [data.provider]: data.key }
   const preferences = await updatePreferences(req.userId, { apiKeys: mergedKeys })
   sendSuccess(res, redactApiKeys(preferences))
+})
+
+router.get('/api-keys', sessionGuard, async (req: Request, res: Response) => {
+  const preferences = await getPreferences(req.userId)
+  const providers = preferences.apiKeys ? Object.keys(preferences.apiKeys) : []
+  sendSuccess(res, { providers })
+})
+
+router.put('/password', sessionGuard, validate(changePasswordSchema), async (req: Request, res: Response) => {
+  const { currentPassword, newPassword } = req.body as { currentPassword: string; newPassword: string }
+
+  if (newPassword === currentPassword) {
+    throw new AppError(400, 'New password must be different from the current password')
+  }
+
+  const user = await User.findById(req.userId)
+  if (!user) throw new AppError(404, 'User not found')
+  if (!user.password) throw new AppError(400, 'Password login is not enabled for this account')
+
+  const valid = await verifyPassword(currentPassword, user.password)
+  if (!valid) throw new AppError(401, 'Current password is incorrect')
+
+  user.password = await hashPassword(newPassword)
+  await user.save()
+
+  sendSuccess(res, { ok: true })
+})
+
+router.delete('/account', sessionGuard, async (req: Request, res: Response) => {
+  const userId = req.userId
+
+  // Cascade-delete all user-owned data so the account leaves no orphans.
+  // All models below have a userId field (verified in their respective schemas).
+  await Promise.all([
+    Application.deleteMany({ userId }),
+    JDAnalysis.deleteMany({ userId }),
+    ResumeVersion.deleteMany({ userId }),
+    InterviewPrep.deleteMany({ userId }),
+    UploadedResume.deleteMany({ userId }),
+    ValidationReport.deleteMany({ userId }),
+    ExportRecord.deleteMany({ userId }),
+    Notification.deleteMany({ userId }),
+  ])
+
+  await User.findByIdAndDelete(userId)
+
+  clearSessionCookie(res)
+  sendSuccess(res, { ok: true })
 })
 
 router.delete('/api-key/:provider', sessionGuard, async (req: Request, res: Response) => {

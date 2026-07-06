@@ -522,6 +522,7 @@ function cleanExtractedText(text: string): string {
       if (!trimmed) return true
       if (/^Page \d+$/i.test(trimmed)) return false
       if (/^\d+\s*\/\s*\d+$/.test(trimmed)) return false
+      if (/^https?:\/\/\S+$/i.test(trimmed)) return false
       return true
     })
     .join('\n')

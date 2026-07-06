@@ -5,6 +5,11 @@ export type NotificationType =
   | 'interview_reminder'
   | 'feature'
   | 'system'
+  | 'deadline_approaching'
+  | 'match_found'
+  | 'workspace_generated'
+  | 'contribution_added'
+  | 'referral_claimed'
 
 export interface INotification extends Document {
   userId: mongoose.Types.ObjectId
@@ -28,7 +33,7 @@ const notificationSchema = new Schema<INotification>(
     },
     type: {
       type: String,
-      enum: ['status_change', 'interview_reminder', 'feature', 'system'],
+      enum: ['status_change', 'interview_reminder', 'feature', 'system', 'deadline_approaching', 'match_found', 'workspace_generated', 'contribution_added', 'referral_claimed'],
       required: true,
       default: 'system',
     },
