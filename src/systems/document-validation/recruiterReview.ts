@@ -1,4 +1,5 @@
 import type { SmartApplicationOutput } from '../smart-application/types'
+import { RECRUITER_CLICHES, WEAK_LANGUAGE_PATTERNS } from '../../engine/validation/constants'
 
 export interface RecruiterFeedback {
   category: string
@@ -64,14 +65,17 @@ function evaluateReadability(markdown: string): RecruiterFeedback {
 function evaluateCredibility(output: SmartApplicationOutput): RecruiterFeedback {
   const issues: string[] = []
 
-  const banned = ['results-driven', 'proven track record', 'highly motivated', 'team player', 'go-getter']
+  // Use shared RECRUITER_CLICHES instead of local duplicate
   const text = [output.resume.markdown, output.coverLetter, output.email.body].join(' ').toLowerCase()
-  for (const phrase of banned) {
+  for (const phrase of RECRUITER_CLICHES) {
     if (text.includes(phrase)) issues.push(`Cliché detected: "${phrase}"`)
   }
 
+  // Use shared WEAK_LANGUAGE_PATTERNS for vague bullet detection
   const bullets = (output.resume.sections?.experience || []).flatMap(e => e.bullets)
-  const vagueBullets = bullets.filter(b => /^responsible for/i.test(b) || /^involved in/i.test(b) || /^helped with/i.test(b))
+  const vagueBullets = bullets.filter(b =>
+    WEAK_LANGUAGE_PATTERNS.some(p => p.test(b)),
+  )
   if (vagueBullets.length > 0) issues.push(`${vagueBullets.length} bullet(s) start with vague language ("responsible for", "involved in")`)
 
   const score = Math.max(0, 100 - issues.length * 12)

@@ -53,6 +53,12 @@ export interface IApplication extends Document {
   exportHistory: { format: string; exportedAt: Date }[]
   scores?: { ats?: number; match?: number; overall?: number }
 
+  // Stored resume content (S5: prevent desync across refinement passes)
+  /** Generated resume in markdown format */
+  resumeMarkdown?: string
+  /** Generated resume as structured JSON */
+  resumeStructured?: Record<string, unknown>
+
   // Smart workflow fields
   exportFolder?: string
   tasks?: ITask[]
@@ -112,6 +118,9 @@ const applicationSchema = new Schema<IApplication>({
     overall: Number,
   },
   // Smart workflow fields
+  // Stored resume content (S5)
+  resumeMarkdown: { type: String },
+  resumeStructured: { type: Schema.Types.Mixed },
   exportFolder: String,
   tasks: [{
     id: String,

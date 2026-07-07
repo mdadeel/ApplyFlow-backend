@@ -1,16 +1,21 @@
 import type { SmartApplicationOutput } from '../smart-application/types'
 
+/**
+ * @deprecated This validator is unused in the current pipeline.
+ * Kept for reference; will be removed in a future cleanup pass.
+ * Use engine/validation/validators/ if re-adding to the pipeline.
+ */
 export interface EngineeringFeedback {
   category: string
   severity: 'error' | 'warning' | 'info'
   message: string
 }
-
 export interface EngineeringReviewReport {
   passed: boolean
   issues: EngineeringFeedback[]
 }
 
+/** @deprecated */
 const SKILL_INFLATION_RED_FLAGS = [
   'architected', 'designed', 'led', 'managed', 'owned',
 ]
@@ -43,6 +48,7 @@ export function engineeringReview(output: SmartApplicationOutput): EngineeringRe
   }
 }
 
+/** @deprecated */
 function detectSkillInflation(output: SmartApplicationOutput): EngineeringFeedback[] {
   const feedback: EngineeringFeedback[] = []
 

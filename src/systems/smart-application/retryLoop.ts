@@ -17,6 +17,11 @@ export interface RetryResult {
   issues: string[]
 }
 
+/**
+ * @deprecated Use `orchestrateRetry()` from `engine/retry/orchestrator` instead.
+ * This full-reset retry loop is replaced by the section-level retry orchestrator.
+ * Kept temporarily for backward compatibility with any direct imports.
+ */
 export async function generateWithRetry(
   generate: GenerateFn,
   profile: CareerProfile,

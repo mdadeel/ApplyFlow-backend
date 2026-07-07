@@ -5,7 +5,7 @@ import { join } from 'path'
 import type { AIProvider } from '../ai/aiProvider'
 import type { SmartApplicationOutput } from './types'
 import type { CareerProfile } from '../career-data/profileService'
-import { validateTruth, stripUnverifiableClaims } from '../document-validation/truthGate'
+import { validateTruthAgainstProfile, stripUnverifiableClaims } from '../document-validation/truthGate'
 import { validateHumanization } from '../document-validation/humanizationValidator'
 
 const HUMANIZATION_THRESHOLD = 70
@@ -145,7 +145,7 @@ export class RefinementService {
     }
 
     // Re-check truth on the modified resume
-    const truthResult = validateTruth(refined, careerProfile)
+    const truthResult = validateTruthAgainstProfile(refined, careerProfile)
     let finalOutput = refined
     if (truthResult.unverifiable.length > 0) {
       console.warn(`[ATS Refinement] Truth gate found ${truthResult.unverifiable.length} new unverifiable claims — reverting`)

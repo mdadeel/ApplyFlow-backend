@@ -1,16 +1,5 @@
-const categoryWeights: Record<string, number> = {
-  Frontend: 1.0,
-  Backend: 1.0,
-  Database: 0.8,
-  Cloud: 0.7,
-  DevOps: 0.7,
-  Testing: 0.6,
-  Languages: 0.9,
-  'Soft Skills': 0.3,
-}
-
 export function calculateMatchScore(
-  userSkills: { name: string; category: string; level: string }[],
+  userSkills: { name: string; level: string }[],
   requiredSkills: string[],
 ): number {
   if (!requiredSkills.length) return 0

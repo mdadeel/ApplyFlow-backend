@@ -8,7 +8,7 @@ import type { SmartApplicationInput, SmartApplicationOutput, SmartApplicationRes
 import { getFullProfile } from '../../systems/career-data/profileService'
 import type { CareerProfile } from '../career-data/profileService'
 import { getAIProvider } from '../ai'
-import { validateTruth, stripUnverifiableClaims } from '../document-validation/truthGate'
+import { validateTruthAgainstProfile, stripUnverifiableClaims } from '../document-validation/truthGate'
 import { RefinementService } from './refinementService'
 
 export class SmartApplicationService {
@@ -20,18 +20,19 @@ export class SmartApplicationService {
     this.refinementService = new RefinementService()
   }
 
-  async createApplication(input: SmartApplicationInput): Promise<SmartApplicationResult> {
+  async createApplication(input: SmartApplicationInput, retrySections?: string[]): Promise<SmartApplicationResult> {
     // 1. Get career profile
     const careerProfile = await getFullProfile(input.userId)
     if (!careerProfile) {
       throw new Error('Career profile not found. Please upload a master CV first.')
     }
 
-    // 2. Try to generate with AI, fallback to template on failure
-    let output: SmartApplicationOutput
+    // 2. Generate with AI, with per-stage error handling (M4)
+    let output: SmartApplicationOutput | null = null
 
+    // Stage 1: Generation + Parse (critical — no output = cannot continue)
     try {
-      const { system, user } = buildSmartApplicationPrompt(input, careerProfile)
+      const { system, user } = buildSmartApplicationPrompt(input, careerProfile, retrySections)
       console.log(`[SmartApplication] Calling AI provider...`)
 
       const rawResponse = await this.aiProvider.generateText(
@@ -43,45 +44,64 @@ export class SmartApplicationService {
 
       output = ResponseParser.parseSingle(rawResponse)
       console.log(`[SmartApplication] Parsed AI response.`)
-
-      // Truth gate: validate every claim against career profile DB
-      console.log(`[SmartApplication] Running truth gate...`)
-      const truthResult = validateTruth(output, careerProfile)
-
-      if (truthResult.unverifiable.length > 0) {
-        console.warn(`[SmartApplication] Truth gate found ${truthResult.unverifiable.length} unverifiable claims:`)
-        for (const issue of truthResult.unverifiable) {
-          console.warn(`  - [${issue.location}] ${issue.claim}: ${issue.reason}`)
-        }
-        output = stripUnverifiableClaims(output, truthResult.unverifiable)
-        // Add truth flags to validation hints
-        output.validationHints.truthFlags = [
-          ...output.validationHints.truthFlags,
-          ...truthResult.unverifiable.map(u => `${u.reason} (at ${u.location})`)
-        ]
-        console.log(`[SmartApplication] Stripped unverifiable claims.`)
-      }
-
-      // Pass 2: Humanization refinement (only if below threshold)
-      console.log(`[SmartApplication] Running humanization refinement...`)
-      const { output: humanized, changes: humanChanges, humanizationScore } = await this.refinementService.refineHumanization(this.aiProvider, output)
-      output = humanized
-      if (humanChanges.length > 0) {
-        console.log(`[SmartApplication] Humanization pass made ${humanChanges.length} change(s):`, humanChanges)
-      }
-      console.log(`[SmartApplication] Humanization score: ${humanizationScore}`)
-
-      // Pass 3: ATS gap fill (only if below threshold)
-      console.log(`[SmartApplication] Running ATS gap fill...`)
-      const { output: atsFilled, changes: atsChanges, atsScore } = await this.refinementService.fillATSGaps(this.aiProvider, output, careerProfile)
-      output = atsFilled
-      if (atsChanges.length > 0) {
-        console.log(`[SmartApplication] ATS refinement made ${atsChanges.length} change(s):`, atsChanges)
-      }
-      console.log(`[SmartApplication] ATS keyword coverage: ${atsScore}%`)
     } catch (err) {
-      console.warn(`[SmartApplication] AI generation failed, using fallback:`, (err as Error).message)
+      console.warn(`[SmartApplication] Generation failed: ${(err as Error).message}, using fallback.`)
       output = this.buildFallbackOutput(input, careerProfile)
+    }
+
+    // Stages 2-4 are refinements — each runs independently on the best output so far.
+    // A failure in one stage does NOT block subsequent stages.
+
+    // Stage 2: Truth Gate (validator — failure doesn't block later refinement)
+    if (output) {
+      try {
+        console.log(`[SmartApplication] Running truth gate...`)
+        const truthResult = validateTruthAgainstProfile(output, careerProfile)
+        if (truthResult.unverifiable.length > 0) {
+          console.warn(`[SmartApplication] Truth gate found ${truthResult.unverifiable.length} unverifiable claims:`)
+          for (const issue of truthResult.unverifiable) {
+            console.warn(`  - [${issue.location}] ${issue.claim}: ${issue.reason}`)
+          }
+          output = stripUnverifiableClaims(output, truthResult.unverifiable)
+          output.validationHints.truthFlags = [
+            ...output.validationHints.truthFlags,
+            ...truthResult.unverifiable.map(u => `${u.reason} (at ${u.location})`)
+          ]
+          console.log(`[SmartApplication] Stripped unverifiable claims.`)
+        }
+      } catch (err) {
+        console.warn(`[SmartApplication] Truth gate failed (continuing with pre-truth output):`, (err as Error).message)
+      }
+    }
+
+    // Stage 3: Humanization (independent refinement)
+    if (output) {
+      try {
+        console.log(`[SmartApplication] Running humanization refinement...`)
+        const { output: humanized, changes: humanChanges, humanizationScore } = await this.refinementService.refineHumanization(this.aiProvider, output)
+        output = humanized
+        if (humanChanges.length > 0) {
+          console.log(`[SmartApplication] Humanization pass made ${humanChanges.length} change(s):`, humanChanges)
+        }
+        console.log(`[SmartApplication] Humanization score: ${humanizationScore}`)
+      } catch (err) {
+        console.warn(`[SmartApplication] Humanization failed (continuing with pre-humanization output):`, (err as Error).message)
+      }
+    }
+
+    // Stage 4: ATS Gap Fill (independent refinement)
+    if (output) {
+      try {
+        console.log(`[SmartApplication] Running ATS gap fill...`)
+        const { output: atsFilled, changes: atsChanges, atsScore } = await this.refinementService.fillATSGaps(this.aiProvider, output, careerProfile)
+        output = atsFilled
+        if (atsChanges.length > 0) {
+          console.log(`[SmartApplication] ATS refinement made ${atsChanges.length} change(s):`, atsChanges)
+        }
+        console.log(`[SmartApplication] ATS keyword coverage: ${atsScore}%`)
+      } catch (err) {
+        console.warn(`[SmartApplication] ATS fill failed (continuing with pre-ATS output):`, (err as Error).message)
+      }
     }
 
     // 3. Calculate scores
@@ -314,6 +334,8 @@ ${input.jdText}`
       role: output.analysis.role,
       jdText: input.jdText,
       status: 'ready',
+      resumeMarkdown: output.resume.markdown,
+      resumeStructured: output.resume.sections ? output.resume.sections as Record<string, unknown> : undefined,
       emailContent: {
         subject: output.email.subject,
         body: output.email.body,

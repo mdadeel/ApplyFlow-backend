@@ -1,5 +1,7 @@
 // Humanization Validator — deterministic rules engine, no AI calls
 
+import { BANNED_WORDS, AI_TRANSITIONS, ACTION_VERBS } from '../../engine/validation/constants'
+
 interface HumanizationIssue {
   severity: 'error' | 'warning'
   message: string
@@ -22,39 +24,6 @@ export interface HumanizationResult {
   issues: HumanizationIssue[]
   metrics: HumanizationMetrics
 }
-
-const BANNED_WORDS = [
-  'passionate', 'cutting-edge', 'cutting edge', 'dynamic', 'leveraged',
-  'utilized', 'innovative', 'game-changing', 'game changing', 'world-class',
-  'world class', 'robust', 'spearheaded', 'orchestrated',
-  'synergy', 'synergize', 'best-in-class', 'best in class',
-  'state-of-the-art', 'state of the art', 'bleeding-edge', 'bleeding edge',
-  'next-level', 'next level', 'mission-critical', 'mission critical',
-  'results-driven', 'results driven', 'proven track record',
-  'highly-skilled', 'highly skilled',
-]
-
-const AI_TRANSITIONS = [
-  'additionally,', 'furthermore,', 'moreover,', 'in addition,',
-  'in conclusion,', 'to summarize,', 'as a result,',
-  'it is worth noting', 'it is important to note',
-  'needless to say', 'it goes without saying',
-  'it should be noted', 'it is noteworthy',
-  'of note,', 'importantly,',
-]
-
-const ACTION_VERBS = [
-  'built', 'developed', 'designed', 'created', 'implemented', 'architected',
-  'led', 'managed', 'directed', 'coordinated', 'delivered', 'shipped',
-  'improved', 'optimized', 'increased', 'reduced', 'decreased', 'cut',
-  'automated', 'migrated', 'transformed', 'modernized', 'refactored',
-  'launched', 'deployed', 'integrated', 'configured', 'established',
-  'mentored', 'trained', 'coached', 'guided', 'advised',
-  'negotiated', 'presented', 'communicated', 'collaborated',
-  'analyzed', 'researched', 'evaluated', 'investigated',
-  'wrote', 'authored', 'documented', 'standardized',
-  'troubleshot', 'resolved', 'debugged', 'tested', 'validated',
-]
 
 function countBannedWords(text: string): number {
   const lower = text.toLowerCase()

@@ -122,7 +122,7 @@ function findSkillInProfile(skill: string, profile: CareerProfile): boolean {
   return false
 }
 
-export function validateTruth(
+export function validateTruthAgainstProfile(
   output: SmartApplicationOutput,
   profile: CareerProfile,
 ): TruthGateResult {

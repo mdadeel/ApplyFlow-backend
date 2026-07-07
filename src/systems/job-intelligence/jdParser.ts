@@ -566,6 +566,73 @@ function extractRedFlags(text: string): string[] {
   return flags
 }
 
+/**
+ * Extract employment type from JD text.
+ * Classifies into: full-time, part-time, contract, internship, freelance.
+ */
+function extractEmploymentType(text: string): string | undefined {
+  const lower = text.toLowerCase()
+  if (/\bfreelance\b/i.test(lower)) return 'freelance'
+  if (/\binternship\b/i.test(lower) || /\bintern\b/i.test(lower)) return 'internship'
+  if (/\bcontract\b/i.test(lower) && !/\bcontract\s*to\s*hire\b/i.test(lower)) return 'contract'
+  if (/\bpart.time\b/i.test(lower)) return 'part-time'
+  if (/\bfull.time\b/i.test(lower)) return 'full-time'
+  return undefined
+}
+
+/**
+ * Extract salary range from JD text.
+ * Matches patterns like $80,000 - $120,000, $80k-$120k, etc.
+ */
+function extractSalaryRange(text: string): { min?: number; max?: number; currency?: string } | undefined {
+  const patterns = [
+    /\$?(\d{1,3}(?:,\d{3})*)\s*-\s*\$?(\d{1,3}(?:,\d{3})*)\s*(K|k)?/,
+    /\$?(\d+)\s*K\s*-\s*\$?(\d+)\s*K/i,
+    /(?:salary|compensation|pay)\s*(?:range|:)\s*\$?(\d{1,3}(?:,\d{3})*)\s*-\s*\$?(\d{1,3}(?:,\d{3})*)/i,
+  ]
+
+  for (const pat of patterns) {
+    const m = text.match(pat)
+    if (m) {
+      const currency = text.includes('£') ? 'GBP' : text.includes('€') ? 'EUR' : 'USD'
+      let min = parseFloat(m[1].replace(/,/g, ''))
+      let max = parseFloat(m[2].replace(/,/g, ''))
+      // If K suffix, multiply by 1000
+      if (m[3] && m[3].toLowerCase() === 'k') {
+        min *= 1000
+        max *= 1000
+      }
+      return { min, max, currency }
+    }
+  }
+  return undefined
+}
+
+/**
+ * Extract soft skills from JD text.
+ * Soft skills are interpersonal/behavioral traits like communication, leadership, teamwork, etc.
+ */
+const SOFT_SKILL_KEYWORDS = [
+  'communication', 'leadership', 'teamwork', 'collaboration', 'problem solving',
+  'critical thinking', 'time management', 'adaptability', 'creativity',
+  'emotional intelligence', 'conflict resolution', 'mentoring', 'coaching',
+  'negotiation', 'presentation', 'public speaking', 'written communication',
+  'verbal communication', 'interpersonal', 'self-motivation', 'work ethic',
+  'attention to detail', 'organizational', 'multitasking', 'prioritization',
+  'decision making', 'analytical thinking', 'strategic thinking', 'innovation',
+]
+
+function extractSoftSkills(text: string): string[] {
+  const lower = text.toLowerCase()
+  const found = new Set<string>()
+  for (const skill of SOFT_SKILL_KEYWORDS) {
+    if (lower.includes(skill)) {
+      found.add(skill.charAt(0).toUpperCase() + skill.slice(1))
+    }
+  }
+  return [...found]
+}
+
 function generateSummary(role: string, company: string, requiredSkills: string[], experienceLevel?: string, responsibilities?: string[]): string {
   const parts: string[] = []
 
@@ -591,7 +658,7 @@ function generateSummary(role: string, company: string, requiredSkills: string[]
   return parts.length > 0 ? parts.join(' ') : 'Job description parsed successfully.'
 }
 
-export function parseJD(jdText: string): ParsedJD {
+export function parseJD(jdText: string): ParsedJD & { employmentType?: string; salaryRange?: { min?: number; max?: number; currency?: string }; softSkills: string[] } {
   const sections = splitIntoSections(jdText)
   const role = extractRole(jdText)
   const company = extractCompany(jdText)
@@ -604,6 +671,9 @@ export function parseJD(jdText: string): ParsedJD {
     role: role || 'Software Engineer',
     location: extractLocation(allText),
     experienceLevel: extractExperienceLevel(allText),
+    employmentType: extractEmploymentType(allText),
+    salaryRange: extractSalaryRange(allText),
+    softSkills: extractSoftSkills(allText),
     requiredSkills,
     niceToHaveSkills,
     keywords: [...extractSkillsFromText(allText)],

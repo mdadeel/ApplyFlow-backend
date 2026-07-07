@@ -3,7 +3,7 @@ import { Project } from '../../models/Project'
 import { Skill } from '../../models/Skill'
 import { IValidatorResult } from '../../models/ValidationReport'
 
-export async function validateTruth(
+export async function validateTruthAgainstDb(
   userId: string,
   content: { experiences: any[]; projects: any[]; skills: string[] },
 ): Promise<IValidatorResult> {

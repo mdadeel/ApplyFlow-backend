@@ -72,7 +72,11 @@ interface PromptVariables {
   masterCVText?: string
 }
 
-export function buildSmartApplicationPrompt(input: SmartApplicationInput, careerProfile: CareerProfile): { system: string; user: string } {
+export function buildSmartApplicationPrompt(
+  input: SmartApplicationInput,
+  careerProfile: CareerProfile,
+  retrySections?: string[],
+): { system: string; user: string } {
   const variables: PromptVariables = {
     careerProfile: JSON.stringify(careerProfile, null, 2),
     jobDescription: input.jdText,
@@ -92,6 +96,31 @@ export function buildSmartApplicationPrompt(input: SmartApplicationInput, career
   } else {
     // Remove the conditional block
     prompt = prompt.replace(/\{\{#if masterCVText\}\}[\s\S]*?\{\{\/if\}\}/, '')
+  }
+
+  // Add section-specific retry instructions when regenerating only certain sections
+  if (retrySections && retrySections.length > 0) {
+    const sectionMap: Record<string, string> = {
+      summary: 'Professional Summary section',
+      experience: 'Experience section (bullets and role descriptions)',
+      projects: 'Projects section',
+      skills: 'Skills section',
+      education: 'Education section',
+      certifications: 'Certifications section',
+      'cover-letter': 'Cover letter',
+      'email-body': 'Email body',
+    }
+
+    const names = retrySections
+      .map(s => sectionMap[s] || s)
+      .filter(Boolean)
+
+    if (names.length > 0) {
+      prompt += `\n\n### REGENERATION INSTRUCTIONS\n` +
+        `Only regenerate the following sections. Keep ALL other sections exactly as they are.\n` +
+        `Sections to regenerate: ${names.join(', ')}\n` +
+        `Do NOT modify or regenerate any other sections. Preserve their existing content exactly.`
+    }
   }
 
   return {

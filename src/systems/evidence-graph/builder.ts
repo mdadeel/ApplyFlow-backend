@@ -1,13 +1,30 @@
 import type { CareerProfile } from '../career-data/profileService'
-import type { EvidenceGraph, EvidenceNode, EvidenceSource, EvidenceIndex } from './types'
+import type {
+  EvidenceGraph, EvidenceNode, EvidenceSource, EvidenceIndex,
+  EvidenceEdge, EdgeType, TraversalMatch,
+} from './types'
 
-function buildIndex(profile: CareerProfile): EvidenceIndex {
+/** Map of company name (lowercase) → set of technologies used at that company */
+interface CompanyTechMap {
+  companyToTech: Map<string, Set<string>>
+  techToCompany: Map<string, Set<string>>
+  projectToTech: Map<string, Set<string>>
+  techToProject: Map<string, Set<string>>
+}
+
+function buildIndex(profile: CareerProfile): EvidenceIndex & CompanyTechMap {
   const skills = new Map<string, EvidenceSource[]>()
   const technologies = new Map<string, EvidenceSource[]>()
   const companies = new Map<string, EvidenceSource[]>()
   const projectTitles = new Map<string, EvidenceSource[]>()
   const certNames = new Map<string, EvidenceSource[]>()
   const educationDegrees = new Map<string, EvidenceSource[]>()
+
+  // Cross-reference maps for edge building
+  const companyToTech = new Map<string, Set<string>>()
+  const techToCompany = new Map<string, Set<string>>()
+  const projectToTech = new Map<string, Set<string>>()
+  const techToProject = new Map<string, Set<string>>()
 
   for (const exp of profile.experiences) {
     const expSource = (field: string, text: string): EvidenceSource => ({
@@ -19,14 +36,24 @@ function buildIndex(profile: CareerProfile): EvidenceIndex {
       confidence: 'exact',
     })
 
-    companies.set(exp.company.toLowerCase(), [
-      ...(companies.get(exp.company.toLowerCase()) || []),
+    const companyLower = exp.company.toLowerCase()
+    companies.set(companyLower, [
+      ...(companies.get(companyLower) || []),
       expSource('company', exp.company),
     ])
 
+    // Track which technologies this company uses
+    if (!companyToTech.has(companyLower)) companyToTech.set(companyLower, new Set())
+    const companyTechs = companyToTech.get(companyLower)!
+
     for (const tech of exp.technologies) {
-      const key = tech.toLowerCase()
-      technologies.set(key, [...(technologies.get(key) || []), expSource('technologies', tech)])
+      const techLower = tech.toLowerCase()
+      technologies.set(techLower, [...(technologies.get(techLower) || []), expSource('technologies', tech)])
+
+      // Cross-reference: this company uses this tech
+      companyTechs.add(techLower)
+      if (!techToCompany.has(techLower)) techToCompany.set(techLower, new Set())
+      techToCompany.get(techLower)!.add(companyLower)
     }
     for (const ach of exp.achievements) {
       const key = ach.toLowerCase()
@@ -48,14 +75,24 @@ function buildIndex(profile: CareerProfile): EvidenceIndex {
       confidence: 'exact',
     })
 
-    projectTitles.set(proj.title.toLowerCase(), [
-      ...(projectTitles.get(proj.title.toLowerCase()) || []),
+    const projLower = proj.title.toLowerCase()
+    projectTitles.set(projLower, [
+      ...(projectTitles.get(projLower) || []),
       projSource('title', proj.title),
     ])
 
+    // Track which technologies this project uses
+    if (!projectToTech.has(projLower)) projectToTech.set(projLower, new Set())
+    const projTechs = projectToTech.get(projLower)!
+
     for (const tech of proj.technologies) {
-      const key = tech.toLowerCase()
-      technologies.set(key, [...(technologies.get(key) || []), projSource('technologies', tech)])
+      const techLower = tech.toLowerCase()
+      technologies.set(techLower, [...(technologies.get(techLower) || []), projSource('technologies', tech)])
+
+      // Cross-reference: this project uses this tech
+      projTechs.add(techLower)
+      if (!techToProject.has(techLower)) techToProject.set(techLower, new Set())
+      techToProject.get(techLower)!.add(projLower)
     }
   }
 
@@ -102,20 +139,127 @@ function buildIndex(profile: CareerProfile): EvidenceIndex {
     ])
   }
 
-  return { skills, technologies, companies, projectTitles, certNames, educationDegrees }
+  return {
+    skills, technologies, companies, projectTitles, certNames, educationDegrees,
+    companyToTech, techToCompany, projectToTech, techToProject,
+  }
 }
 
 export class EvidenceGraphBuilder {
-  private index: EvidenceIndex
+  private index: EvidenceIndex & CompanyTechMap
+  private _edges: EvidenceEdge[] = []
 
   constructor(profile: CareerProfile) {
     this.index = buildIndex(profile)
+    this.buildEdges()
   }
 
   getIndex(): EvidenceIndex {
     return this.index
   }
 
+  get edges(): EvidenceEdge[] {
+    return this._edges
+  }
+
+  /**
+   * Build evidence-backed edges between related facts in the index.
+   *
+   * Only creates edges where there is actual evidence linking two nodes.
+   * For example, a USES edge between a company and technology is only
+   * created if an experience at that company actually lists that technology.
+   * No all-pairs edges are created.
+   */
+  private buildEdges(): void {
+    const edges: EvidenceEdge[] = []
+    const now = new Date()
+
+    // Connect technologies to skills that share names
+    for (const [techName] of this.index.technologies) {
+      const skillSources = this.index.skills.get(techName)
+      if (skillSources && skillSources.length > 0) {
+        edges.push({
+          source: techName,
+          target: techName,
+          type: 'RELATED_TO',
+          weight: 0.8,
+          createdAt: now,
+          metadata: { relation: 'technology-skill' },
+        })
+      }
+    }
+
+    // Connect companies ONLY to technologies they actually use (evidence-backed)
+    for (const [companyName, techs] of this.index.companyToTech) {
+      for (const techName of techs) {
+        edges.push({
+          source: companyName,
+          target: techName,
+          type: 'USES',
+          weight: 0.7,
+          createdAt: now,
+          metadata: { relation: 'company-technology' },
+        })
+      }
+    }
+
+    // Connect projects ONLY to technologies they actually use (evidence-backed)
+    for (const [projName, techs] of this.index.projectToTech) {
+      for (const techName of techs) {
+        edges.push({
+          source: projName,
+          target: techName,
+          type: 'USES',
+          weight: 0.6,
+          createdAt: now,
+          metadata: { relation: 'project-technology' },
+        })
+      }
+    }
+
+    // Connect skills to companies where those skills appear as technologies
+    // (a skill like 'TypeScript' that also appears as a technology at a company)
+    for (const [skillName] of this.index.skills) {
+      const companiesUsingSkill = this.index.techToCompany.get(skillName)
+      if (companiesUsingSkill) {
+        for (const companyName of companiesUsingSkill) {
+          edges.push({
+            source: skillName,
+            target: companyName,
+            type: 'WORKED_AT',
+            weight: 0.5,
+            createdAt: now,
+            metadata: { relation: 'skill-company' },
+          })
+        }
+      }
+    }
+
+    // Connect certifications to their issuers (DERIVED_FROM edge)
+    for (const [certName, certSources] of this.index.certNames) {
+      for (const src of certSources) {
+        edges.push({
+          source: certName,
+          target: src.sourceLabel,
+          type: 'DERIVED_FROM',
+          weight: 1.0,
+          createdAt: now,
+          metadata: { relation: 'cert-issuer' },
+        })
+      }
+    }
+
+    this._edges = edges
+  }
+
+  /**
+   * Add a custom edge to the graph.
+   */
+  addEdge(edge: EvidenceEdge): void {
+    this._edges.push(edge)
+  }
+
+  /** Lookup methods — unchanged API for backward compatibility */
   lookupSkill(name: string): EvidenceSource[] {
     return this.index.skills.get(name.toLowerCase()) || []
   }
@@ -140,16 +284,89 @@ export class EvidenceGraphBuilder {
     return this.index.educationDegrees.get(degree.toLowerCase()) || []
   }
 
+  /**
+   * BFS traversal starting from a node claim.
+   * Returns all nodes reachable within `maxDepth` along edges of `edgeType`.
+   * If `edgeType` is undefined, traverses all edge types.
+   */
+  traverse(
+    claim: string,
+    edgeType?: EdgeType,
+    maxDepth: number = 2,
+  ): TraversalMatch[] {
+    const results: TraversalMatch[] = []
+    const visited = new Set<string>()
+    const lowerClaim = claim.toLowerCase()
+
+    // Build adjacency list: node claim -> edges
+    const adjacency = new Map<string, EvidenceEdge[]>()
+    for (const edge of this._edges) {
+      const srcLower = edge.source.toLowerCase()
+      if (!adjacency.has(srcLower)) adjacency.set(srcLower, [])
+      adjacency.get(srcLower)!.push(edge)
+    }
+
+    // BFS
+    const queue: Array<{ claim: string; path: EvidenceEdge[]; depth: number }> = [
+      { claim: lowerClaim, path: [], depth: 0 },
+    ]
+    visited.add(lowerClaim)
+
+    while (queue.length > 0) {
+      const current = queue.shift()!
+      if (current.depth > 0) {
+        // Build a synthetic node for the result
+        const sources = this.findSources(current.claim, '')
+        const node: EvidenceNode = {
+          claim: current.claim,
+          claimType: 'related',
+          sources,
+          coverage: sources.length > 0 ? 1 : 0,
+        }
+        results.push({ node, path: current.path, depth: current.depth })
+      }
+
+      if (current.depth >= maxDepth) continue
+
+      const outgoingEdges = adjacency.get(current.claim) || []
+      for (const edge of outgoingEdges) {
+        if (edgeType && edge.type !== edgeType) continue
+        const targetLower = edge.target.toLowerCase()
+        if (!visited.has(targetLower)) {
+          visited.add(targetLower)
+          queue.push({
+            claim: targetLower,
+            path: [...current.path, edge],
+            depth: current.depth + 1,
+          })
+        }
+      }
+    }
+
+    return results
+  }
+
+  /**
+   * Build the graph for a set of claims.
+   * Returns an EvidenceGraph with nodes, edges, and metadata.
+   */
   build(claims: Array<{ text: string; type: string }>): EvidenceGraph {
     const nodes: EvidenceNode[] = []
+    const allEdges: EvidenceEdge[] = [...this._edges]
 
     for (const claim of claims) {
       const sources = this.findSources(claim.text, claim.type)
+      // Find edges relevant to this claim
+      const claimLower = claim.text.toLowerCase()
+      const claimEdges = allEdges.filter(
+        e => e.source.toLowerCase() === claimLower || e.target.toLowerCase() === claimLower
+      )
       nodes.push({
         claim: claim.text,
         claimType: claim.type,
         sources,
         coverage: sources.length > 0 ? 1 : 0,
+        edges: claimEdges.length > 0 ? claimEdges : undefined,
       })
     }
 
@@ -160,6 +377,7 @@ export class EvidenceGraphBuilder {
 
     return {
       nodes,
+      edges: allEdges,
       metadata: {
         totalClaims,
         totalSources,

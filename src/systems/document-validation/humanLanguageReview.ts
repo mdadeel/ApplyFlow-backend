@@ -1,4 +1,5 @@
 import type { SmartApplicationOutput } from '../smart-application/types'
+import { LANGUAGE_REPLACEMENTS, AI_COVER_LETTER_PHRASES } from '../../engine/validation/constants'
 
 export interface LanguageIssue {
   original: string
@@ -13,46 +14,10 @@ export interface LanguageReviewReport {
   score: number
 }
 
-const BLACKLIST: Array<{ pattern: RegExp; replacement: string }> = [
-  { pattern: /\b(results-driven)\b/gi, replacement: 'focused on outcomes' },
-  { pattern: /\b(passionate)\b/gi, replacement: '' },
-  { pattern: /\b(thrilled)\b/gi, replacement: '' },
-  { pattern: /\b(excited)\b/gi, replacement: '' },
-  { pattern: /\b(seasoned)\b/gi, replacement: 'experienced' },
-  { pattern: /\b(dynamic)\b/gi, replacement: '' },
-  { pattern: /\b(highly motivated)\b/gi, replacement: '' },
-  { pattern: /\b(proven track record)\b/gi, replacement: 'track record' },
-  { pattern: /\b(fast-paced)\b/gi, replacement: 'dynamic' },
-  { pattern: /\b(cutting-edge|cuttings? edge)\b/gi, replacement: 'modern' },
-  { pattern: /\b(state-of-the-art)\b/gi, replacement: 'modern' },
-  { pattern: /\b(leveraged?)\b/gi, replacement: 'used' },
-  { pattern: /\b(utilized?)\b/gi, replacement: 'used' },
-  { pattern: /\b(innovative)\b/gi, replacement: '' },
-  { pattern: /\b(synergy|synergize)\b/gi, replacement: 'collaboration' },
-  { pattern: /\b(deep dive|deep-dive)\b/gi, replacement: 'thorough analysis' },
-  { pattern: /\b(drill down|drill-down)\b/gi, replacement: 'detailed review' },
-  { pattern: /\b(think outside the box)\b/gi, replacement: 'approach creatively' },
-  { pattern: /\b(game[- ]?changer?)\b/gi, replacement: 'significant impact' },
-  { pattern: /\b(best[- ]?in[- ]?class)\b/gi, replacement: 'high-quality' },
-  { pattern: /\b(thought leader)\b/gi, replacement: 'expert' },
-  { pattern: /\b(learnings)\b/gi, replacement: 'lessons' },
-  { pattern: /\b(ask)\b(?:\s+for\s+help)?/gi, replacement: 'request' },
-]
-
-const AI_PHRASES = [
-  /\bI am writing to (express|apply)\b/i,
-  /\bI am excited to (apply|submit|present)\b/i,
-  /\bThis role (aligns with|matches) my (skills|experience|background)\b/i,
-  /\bI am confident that my (skills|experience|background)\b/i,
-  /\bAs a highly (skilled|motivated|experienced)\b/i,
-  /\bI possess a (strong|deep|thorough) (understanding|knowledge)\b/i,
-  /\bWith my (extensive|strong|proven) background\b/i,
-]
-
 function scanSection(text: string, location: string): LanguageIssue[] {
   const issues: LanguageIssue[] = []
 
-  for (const entry of BLACKLIST) {
+  for (const entry of LANGUAGE_REPLACEMENTS) {
     const matches = text.match(entry.pattern)
     if (matches) {
       issues.push({
@@ -64,7 +29,7 @@ function scanSection(text: string, location: string): LanguageIssue[] {
     }
   }
 
-  for (const pattern of AI_PHRASES) {
+  for (const pattern of AI_COVER_LETTER_PHRASES) {
     const match = text.match(pattern)
     if (match) {
       issues.push({
@@ -129,7 +94,7 @@ export function reviewLanguage(output: SmartApplicationOutput): LanguageReviewRe
 
 export function cleanupLanguage(text: string): string {
   let cleaned = text
-  for (const entry of BLACKLIST) {
+  for (const entry of LANGUAGE_REPLACEMENTS) {
     cleaned = cleaned.replace(entry.pattern, entry.replacement)
   }
   cleaned = cleaned.replace(/\s+/g, ' ').trim()
