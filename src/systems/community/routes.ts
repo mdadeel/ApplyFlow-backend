@@ -32,9 +32,14 @@ import {
   listReferrals,
   createReferralRequest,
   claimReferral,
+  getReferralMatches,
+  acceptReferral,
+  withdrawReferral,
+  completeReferral,
   listPosts,
   createPost,
   likePost,
+  getFeed,
 } from './communityService'
 
 const router = Router()
@@ -47,7 +52,7 @@ const listTemplatesQuerySchema = z.object({
 
 const listReferralsQuerySchema = z.object({
   company: z.string().optional(),
-  status: z.enum(['open', 'claimed', 'closed', 'expired']).optional(),
+  status: z.enum(['open', 'claimed', 'matched', 'accepted', 'completed', 'withdrawn', 'closed', 'expired']).optional(),
   opportunityId: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
 })
@@ -140,6 +145,67 @@ router.post('/referrals/:id/claim', sessionGuard, async (req: Request, res: Resp
   } catch (err) {
     throw new AppError(404, err instanceof Error ? err.message : 'Referral not found')
   }
+})
+
+router.get('/referrals/:id/matches', sessionGuard, async (req: Request, res: Response) => {
+  try {
+    const matches = await getReferralMatches(String(req.params.id), req.userId!)
+    sendSuccess(res, matches)
+  } catch (err) {
+    throw new AppError(404, err instanceof Error ? err.message : 'Referral not found')
+  }
+})
+
+router.post('/referrals/:id/accept', sessionGuard, async (req: Request, res: Response) => {
+  const parsed = z.object({ matchedReferralId: z.string().optional() }).safeParse(req.body ?? {})
+  if (!parsed.success) {
+    throw new AppError(400, 'Invalid input: ' + parsed.error.message)
+  }
+  try {
+    const updated = await acceptReferral(String(req.params.id), req.userId!, parsed.data.matchedReferralId)
+    sendSuccess(res, updated)
+  } catch (err) {
+    const status = err instanceof Error && err.message.includes('Cannot') ? 400 : 404
+    throw new AppError(status, err instanceof Error ? err.message : 'Referral not found')
+  }
+})
+
+router.put('/referrals/:id/withdraw', sessionGuard, async (req: Request, res: Response) => {
+  try {
+    const updated = await withdrawReferral(String(req.params.id), req.userId!)
+    sendSuccess(res, updated)
+  } catch (err) {
+    const status = err instanceof Error && err.message.includes('Not authorized') ? 403 : 400
+    throw new AppError(status, err instanceof Error ? err.message : 'Referral not found')
+  }
+})
+
+router.put('/referrals/:id/complete', sessionGuard, async (req: Request, res: Response) => {
+  try {
+    const updated = await completeReferral(String(req.params.id), req.userId!)
+    sendSuccess(res, updated)
+  } catch (err) {
+    const status = err instanceof Error && err.message.includes('Can only') ? 400 : 404
+    throw new AppError(status, err instanceof Error ? err.message : 'Referral not found')
+  }
+})
+
+// ---------- Feed ----------
+
+const feedQuerySchema = z.object({
+  tab: z.enum(['for-you', 'trending', 'my-activity']).optional().default('for-you'),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional().default(20),
+})
+
+router.get('/feed', sessionGuard, async (req: Request, res: Response) => {
+  const parsed = feedQuerySchema.safeParse(req.query)
+  if (!parsed.success) {
+    throw new AppError(400, 'Invalid query: ' + parsed.error.message)
+  }
+
+  const feed = await getFeed({ ...parsed.data, userId: req.userId! })
+  sendSuccess(res, feed)
 })
 
 // ---------- Posts ----------

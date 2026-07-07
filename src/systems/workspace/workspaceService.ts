@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { ApplicationWorkspace, WorkspaceStatus } from '../../models/ApplicationWorkspace'
+import { Application } from '../../models/Application'
+import { UploadedResume } from '../../models/UploadedResume'
 import { Opportunity } from '../../models/Opportunity'
 import { User } from '../../models/User'
 import { getFullProfile } from '../career-data/profileService'
@@ -240,6 +242,66 @@ export async function submitWorkspace(id: string, userId: string) {
 
   workspace.status = 'submitted'
   return workspace.save()
+}
+
+export async function sendToResumeLibrary(id: string, userId: string) {
+  const workspace = await ApplicationWorkspace.findOne({ _id: id, userId })
+  if (!workspace) throw new Error('Workspace not found')
+  if (!workspace.tailoredResume?.content) throw new Error('No tailored resume content to save')
+
+  await UploadedResume.create({
+    userId,
+    fileName: `workspace-resume-${workspace.opportunityId}.md`,
+    fileType: 'docx',
+    rawText: workspace.tailoredResume.content,
+    content: {
+      summary: '',
+      experiences: [],
+      projects: [],
+      skills: [],
+      education: [],
+      certificates: [],
+    },
+  })
+}
+
+export async function exportWorkspace(id: string, userId: string, format: string) {
+  const workspace = await ApplicationWorkspace.findOne({ _id: id, userId })
+  if (!workspace) throw new Error('Workspace not found')
+
+  // Return the content in the requested format — actual file generation
+  // is handled by the export engine on the frontend side
+  const content: Record<string, unknown> = {
+    format,
+    tailoredResume: workspace.tailoredResume?.content ?? null,
+    coverLetter: workspace.coverLetter?.content ?? null,
+    emailSubject: workspace.recruiterEmail?.subject ?? null,
+    emailBody: workspace.recruiterEmail?.body ?? null,
+  }
+  return content
+}
+
+export async function createApplicationFromWorkspace(id: string, userId: string) {
+  const workspace = await ApplicationWorkspace.findOne({ _id: id, userId })
+  if (!workspace) throw new Error('Workspace not found')
+
+  const opportunity = await Opportunity.findById(workspace.opportunityId)
+  if (!opportunity) throw new Error('Opportunity not found')
+
+  const app = await Application.create({
+    userId,
+    company: opportunity.company,
+    role: opportunity.title,
+    jdText: opportunity.description,
+    status: 'draft',
+    coverLetterContent: workspace.coverLetter?.content,
+    emailContent: workspace.recruiterEmail
+      ? { subject: workspace.recruiterEmail.subject, body: workspace.recruiterEmail.body, tone: 'professional' }
+      : undefined,
+    timeline: [{ event: 'Application created from workspace', date: new Date() }],
+  })
+
+  return app
 }
 
 export async function listUserWorkspaces(userId: string) {

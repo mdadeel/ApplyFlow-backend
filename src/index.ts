@@ -86,6 +86,9 @@ app.use('/api/notifications', notificationRoutes)
 import communityRoutes from './systems/community/routes'
 app.use('/api/v1/community', communityRoutes)
 
+import discussionRoutes from './systems/discussion/routes'
+app.use('/api/discussions', discussionRoutes)
+
 import opportunityRoutes from './systems/opportunity/routes'
 app.use('/api/opportunities', opportunityRoutes)
 
@@ -100,6 +103,16 @@ app.use('/api', recommenderRoutes)
 
 import communityAnalyticsRoutes from './systems/community-analytics/routes'
 app.use('/api/analytics/community', communityAnalyticsRoutes)
+
+import reputationRoutes from './systems/reputation/routes'
+app.use('/api', reputationRoutes)
+
+// Engine (observability + learning)
+import engineHealthRoutes from './engine/observability/index'
+app.use('/api/v1/engine', engineHealthRoutes)
+
+import engineLearningRoutes from './engine/learning/routes'
+app.use('/api/v1/engine/learning', engineLearningRoutes)
 
 import { start as startIngestionWorker } from './workers/opportunity-ingestion'
 import { start as startEmbeddingWorker } from './workers/embedding-refresh'

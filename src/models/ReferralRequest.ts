@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose'
 
-export type ReferralStatus = 'open' | 'claimed' | 'closed' | 'expired'
+export type ReferralStatus = 'open' | 'claimed' | 'matched' | 'accepted' | 'completed' | 'withdrawn' | 'closed' | 'expired'
 
 export interface IReferralRequest extends Document {
   userId: string
@@ -13,6 +13,7 @@ export interface IReferralRequest extends Document {
   status: ReferralStatus
   responderId?: string
   responseNote?: string
+  matchedReferralId?: string
   expiresAt?: Date
   opportunityId?: string
   createdAt: Date
@@ -30,11 +31,12 @@ const referralRequestSchema = new Schema<IReferralRequest>(
     tags: { type: [String], default: [], validate: (v: string[]) => v.length <= 10 },
     status: {
       type: String,
-      enum: ['open', 'claimed', 'closed', 'expired'],
+      enum: ['open', 'claimed', 'matched', 'accepted', 'completed', 'withdrawn', 'closed', 'expired'],
       default: 'open',
     },
     responderId: { type: String, default: undefined },
     responseNote: { type: String, maxlength: 5000 },
+    matchedReferralId: { type: String, default: undefined },
     expiresAt: { type: Date, default: undefined },
     opportunityId: { type: String, index: true, default: undefined },
   },
