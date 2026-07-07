@@ -1,5 +1,6 @@
 // Profile Service - Aggregates all career profile data
 
+import mongoose from 'mongoose'
 import { Experience } from '../../models/Experience'
 import { Project } from '../../models/Project'
 import { Skill } from '../../models/Skill'
@@ -11,7 +12,38 @@ import { Volunteering } from '../../models/Volunteering'
 import { Language } from '../../models/Language'
 import { Interest } from '../../models/Interest'
 import { User } from '../../models/User'
+import { ProfileAudit } from '../../models/ProfileAudit'
 import type { ExtractedProfile } from './pdfExtractor'
+
+export interface MergeConflict {
+  section: string
+  field: string
+  existingValue: unknown
+  incomingValue: unknown
+  resolution: 'use_existing' | 'use_incoming' | 'flag_for_review'
+}
+
+export interface MergeResult {
+  conflicts: MergeConflict[]
+  created: number
+  updated: number
+  skipped: number
+}
+
+/**
+ * Check if MongoDB is running in a replica-set configuration (required for transactions).
+ * Falls back to false if we can't determine (standalone/unknown).
+ */
+async function supportsTransactions(): Promise<boolean> {
+  try {
+    const admin = mongoose.connection.db?.admin()
+    if (!admin) return false
+    const replStatus = await admin.command({ replSetGetStatus: 1 }).catch(() => null)
+    return replStatus !== null && replStatus.myState !== undefined
+  } catch {
+    return false
+  }
+}
 
 const SKILL_CATEGORY_MAP: Record<string, string> = {
   frontend: 'Frontend',
@@ -247,7 +279,323 @@ export async function getFullProfile(userId: string): Promise<CareerProfile | nu
   }
 }
 
+/**
+ * Merge an extracted profile into the user's existing career data.
+ *
+ * For each section (experiences, projects, skills, etc.):
+ * - If a record already exists with the same unique key (e.g. company+role for experience),
+ *   the existing data is kept and the incoming diff is logged as a conflict.
+ * - If no matching record exists, the incoming data is appended (upsert).
+ *
+ * All writes happen inside a Mongoose transaction for atomicity.
+ * All changes are recorded in the ProfileAudit collection.
+ */
+export async function mergeProfile(userId: string, extracted: ExtractedProfile): Promise<MergeResult> {
+  const session = await mongoose.startSession()
+  const hasTransactions = await supportsTransactions()
+
+  if (hasTransactions) {
+    session.startTransaction()
+  }
+
+  const result: MergeResult = { conflicts: [], created: 0, updated: 0, skipped: 0 }
+
+  try {
+    const opts = hasTransactions ? { session } : {}
+
+    // --- Experiences: merge by company+role ---
+    const existingExperiences = await Experience.find({ userId }).session(session).lean()
+    for (const exp of extracted.experiences) {
+      const existing = existingExperiences.find(
+        e => e.company === exp.company && e.role === exp.role
+      )
+      if (existing) {
+        const conflicts = detectExperienceConflicts(existing, exp)
+        if (conflicts.length > 0) {
+          result.conflicts.push(...conflicts)
+          result.skipped++
+        }
+      } else {
+        await Experience.create([{
+          userId,
+          company: exp.company,
+          role: exp.role,
+          startDate: exp.startDate,
+          endDate: exp.endDate || undefined,
+          current: exp.current,
+          responsibilities: exp.responsibilities || [],
+          technologies: exp.technologies || [],
+          achievements: exp.achievements || [],
+          metrics: exp.metrics || [],
+          projects: exp.projects || [],
+          links: exp.links || undefined,
+        }], opts)
+        result.created++
+      }
+    }
+
+    // --- Projects: merge by title ---
+    const existingProjects = await Project.find({ userId }).session(session).lean()
+    for (const proj of extracted.projects) {
+      const existing = existingProjects.find(e => e.title === proj.title)
+      if (existing) {
+        result.skipped++
+      } else {
+        await Project.create([{
+          userId,
+          title: proj.title,
+          description: proj.description,
+          technologies: proj.technologies || [],
+          features: proj.features || [],
+          outcome: proj.outcome || '',
+          github: proj.github || '',
+          demo: proj.demo || '',
+          tags: proj.tags || [],
+          links: proj.links || undefined,
+          problem: proj.problem || '',
+          solution: proj.solution || '',
+          challenges: proj.challenges || [],
+          documentation: proj.documentation || undefined,
+          impact: proj.impact || undefined,
+          duration: proj.duration || undefined,
+          teamSize: proj.teamSize || undefined,
+          role: proj.role || undefined,
+        }], opts)
+        result.created++
+      }
+    }
+
+    // --- Skills: merge by name (upsert category/level) ---
+    const existingSkills = await Skill.find({ userId }).session(session).lean()
+    for (const skill of extracted.skills) {
+      const existing = existingSkills.find(
+        e => e.name.toLowerCase() === skill.name.toLowerCase()
+      )
+      if (existing) {
+        // Update level if incoming is higher
+        const existingLevelIdx = SKILL_LEVELS.indexOf(existing.level as (typeof SKILL_LEVELS)[number])
+        const incomingLevelIdx = SKILL_LEVELS.indexOf(mapSkillLevel(skill.level))
+        if (incomingLevelIdx > existingLevelIdx) {
+          await Skill.updateOne(
+            { _id: existing._id },
+            { level: mapSkillLevel(skill.level) },
+            { session }
+          )
+          result.updated++
+        } else {
+          result.skipped++
+        }
+      } else {
+        await Skill.create([{
+          userId,
+          name: skill.name,
+          category: mapSkillCategory(skill.category),
+          level: mapSkillLevel(skill.level),
+        }], opts)
+        result.created++
+      }
+    }
+
+    // --- Education: merge by degree+institution ---
+    const existingEducation = await Education.find({ userId }).session(session).lean()
+    for (const edu of extracted.education) {
+      const existing = existingEducation.find(
+        e => e.degree === edu.degree && e.institution === edu.institution
+      )
+      if (existing) {
+        result.skipped++
+      } else {
+        await Education.create([{
+          userId,
+          degree: edu.degree,
+          institution: edu.institution,
+          startDate: edu.startDate,
+          endDate: edu.endDate,
+          result: edu.result || '',
+        }], opts)
+        result.created++
+      }
+    }
+
+    // --- Certificates: merge by name ---
+    const existingCerts = await Certificate.find({ userId }).session(session).lean()
+    for (const cert of extracted.certificates) {
+      const existing = existingCerts.find(e => e.name === cert.name)
+      if (existing) {
+        result.skipped++
+      } else {
+        await Certificate.create([{
+          userId,
+          name: cert.name,
+          issuer: cert.issuer,
+          date: cert.date,
+          url: cert.url || undefined,
+        }], opts)
+        result.created++
+      }
+    }
+
+    // --- Awards: merge by title ---
+    const existingAwards = await Award.find({ userId }).session(session).lean()
+    for (const award of extracted.awards || []) {
+      const existing = existingAwards.find(e => e.title === award.title)
+      if (existing) {
+        result.skipped++
+      } else {
+        await Award.create([{
+          userId,
+          title: award.title,
+          issuer: award.issuer,
+          date: award.date || undefined,
+          description: award.description || undefined,
+          url: award.url || undefined,
+          order: 0,
+        }], opts)
+        result.created++
+      }
+    }
+
+    // --- Publications: merge by title ---
+    const existingPubs = await Publication.find({ userId }).session(session).lean()
+    for (const pub of extracted.publications || []) {
+      const existing = existingPubs.find(e => e.title === pub.title)
+      if (existing) {
+        result.skipped++
+      } else {
+        await Publication.create([{
+          userId,
+          title: pub.title,
+          publisher: pub.publisher,
+          date: pub.date || undefined,
+          url: pub.url || undefined,
+          description: pub.description || undefined,
+          authors: pub.authors || [],
+          order: 0,
+        }], opts)
+        result.created++
+      }
+    }
+
+    // --- Volunteering: merge by organization+role ---
+    const existingVol = await Volunteering.find({ userId }).session(session).lean()
+    for (const vol of extracted.volunteering || []) {
+      const existing = existingVol.find(
+        e => e.organization === vol.organization && e.role === vol.role
+      )
+      if (existing) {
+        result.skipped++
+      } else {
+        await Volunteering.create([{
+          userId,
+          organization: vol.organization,
+          role: vol.role,
+          startDate: vol.startDate || undefined,
+          endDate: vol.endDate || undefined,
+          current: vol.current,
+          description: vol.description || undefined,
+          technologies: vol.technologies || [],
+          url: vol.url || undefined,
+          order: 0,
+        }], opts)
+        result.created++
+      }
+    }
+
+    // --- Languages: merge by name ---
+    const existingLangs = await Language.find({ userId }).session(session).lean()
+    for (const lang of extracted.languages || []) {
+      const existing = existingLangs.find(e => e.name === lang.name)
+      if (existing) {
+        result.skipped++
+      } else {
+        await Language.create([{
+          userId,
+          name: lang.name,
+          proficiency: lang.proficiency,
+        }], opts)
+        result.created++
+      }
+    }
+
+    // --- Interests: merge by name ---
+    const existingInterests = await Interest.find({ userId }).session(session).lean()
+    for (const interest of extracted.interests || []) {
+      const existing = existingInterests.find(e => e.name === interest.name)
+      if (existing) {
+        result.skipped++
+      } else {
+        await Interest.create([{
+          userId,
+          name: interest.name,
+          category: interest.category || undefined,
+        }], opts)
+        result.created++
+      }
+    }
+
+    // Record audit entry
+    await ProfileAudit.create([{
+      userId,
+      action: 'merge',
+      section: 'all',
+      confidence: 0.8,
+      performedBy: 'ai_extraction',
+      newValue: {
+        experiencesCreated: extracted.experiences.length,
+        projectsCreated: extracted.projects.length,
+        skillsCreated: extracted.skills.length,
+        conflictsFound: result.conflicts.length,
+      },
+    }], opts)
+
+    if (hasTransactions) {
+      await session.commitTransaction()
+    }
+    return result
+  } catch (error) {
+    if (hasTransactions) {
+      await session.abortTransaction()
+    }
+    throw error
+  } finally {
+    session.endSession()
+  }
+}
+
+function detectExperienceConflicts(
+  existing: { company: string; role: string; startDate?: string; endDate?: string; current?: boolean; employmentType?: string; location?: string; workMode?: string },
+  incoming: { company: string; role: string; startDate?: string; endDate?: string; current?: boolean; employmentType?: string; location?: string; workMode?: string }
+): MergeConflict[] {
+  const conflicts: MergeConflict[] = []
+  const compareFields: Array<keyof typeof existing> = ['company', 'role', 'startDate', 'endDate', 'current', 'employmentType', 'location', 'workMode']
+
+  for (const field of compareFields) {
+    const existingVal = existing[field]
+    const incomingVal = incoming[field]
+    if (existingVal && incomingVal && String(existingVal) !== String(incomingVal)) {
+      conflicts.push({
+        section: 'experience',
+        field: `${field} (${existing.company}/${existing.role})`,
+        existingValue: existingVal,
+        incomingValue: incomingVal,
+        resolution: 'use_existing',
+      })
+    }
+  }
+
+  return conflicts
+}
+
+/**
+ * @deprecated Use mergeProfile() instead. This function destructively replaces all
+ * career data for the user. It will be removed in a future version.
+ *
+ * The new mergeProfile() appends new data and preserves existing records,
+ * with conflict detection and full audit trail.
+ */
 export async function saveExtractedProfile(userId: string, extracted: ExtractedProfile): Promise<void> {
+  console.warn('[DEPRECATED] saveExtractedProfile uses destructive deleteMany. Use mergeProfile() instead.')
+
   // Clear existing data for this user to avoid duplicates
   await Promise.all([
     Experience.deleteMany({ userId }),

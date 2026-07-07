@@ -149,6 +149,8 @@ export interface ExtractedProfile {
   interests?: ExtractedInterest[]
   customSections?: CustomSection[]
   links?: ExtractedLink[]
+  /** URLs extracted from the raw document text (parallel to cleanedText) */
+  extractedUrls?: string[]
   documentStructure?: {
     detectedSections: string[]
     totalHeadings: number
@@ -194,7 +196,9 @@ function normalizeSkill(value: any): ExtractedSkill | null {
 }
 
 export async function extractProfileFromPDF(text: string): Promise<ExtractedProfile> {
-  const trimmed = cleanExtractedText(text || '')
+  const rawText = text || ''
+  const extractedUrls = extractUrls(rawText)
+  const trimmed = cleanExtractedText(rawText)
   const empty: ExtractedProfile = {
     personal: undefined,
     experiences: [],
@@ -212,7 +216,6 @@ export async function extractProfileFromPDF(text: string): Promise<ExtractedProf
 
   const prompt = `You are a resume parser. Extract the following information from the text into a clean JSON format.
 Ensure you return ONLY valid JSON.
-Keep fields like 'confidence' and 'links' minimal. 
 
 REQUIRED JSON STRUCTURE:
 {
@@ -508,8 +511,17 @@ ${trimmed}`
     interests,
     customSections,
     links: Array.isArray(parsed.links) ? parsed.links : undefined,
+    extractedUrls,
     documentStructure
   })
+}
+
+/** Extract all URLs found in text into a deduplicated array */
+export function extractUrls(text: string): string[] {
+  const urlRegex = /https?:\/\/[^\s<>"'()]+/gi
+  const matches = text.match(urlRegex)
+  if (!matches) return []
+  return [...new Set(matches)]
 }
 
 function cleanExtractedText(text: string): string {
@@ -522,7 +534,6 @@ function cleanExtractedText(text: string): string {
       if (!trimmed) return true
       if (/^Page \d+$/i.test(trimmed)) return false
       if (/^\d+\s*\/\s*\d+$/.test(trimmed)) return false
-      if (/^https?:\/\/\S+$/i.test(trimmed)) return false
       return true
     })
     .join('\n')

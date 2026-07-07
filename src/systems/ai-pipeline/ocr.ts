@@ -1,4 +1,5 @@
-import { recognize } from 'tesseract.js'
+import Tesseract from 'tesseract.js'
+const { recognize } = Tesseract
 import { extractTextFromPDF } from '../career-data/pdfParser'
 
 export interface OcrResult {

@@ -4,10 +4,10 @@ import { UploadedResume } from '../../models/UploadedResume'
 import { sessionGuard } from '../identity/sessionGuard'
 import { AppError } from '../../middleware/errorHandler'
 import { sendSuccess } from '../../utils/response'
-import { extractTextFromDOCX } from './docxParser'
+import { extractFromDOCX, extractTextFromDOCX } from './docxParser'
 import { extractTextFromPDF } from './pdfParser'
-import { extractProfileFromPDF } from './pdfExtractor'
-import { saveExtractedProfile } from './profileService'
+import { extractProfileFromPDF, extractUrls } from './pdfExtractor'
+import { mergeProfile } from './profileService'
 
 const router = Router()
 router.use(sessionGuard)
@@ -61,6 +61,20 @@ router.post(
       throw new AppError(400, 'Could not extract any text from the document.')
     }
 
+    // Extract URLs from raw text (PDF already has links in annotations, DOCX needs separate extraction)
+    let documentUrls: string[] = extractUrls(rawText)
+    if (fileType !== 'pdf') {
+      // For DOCX files, also try to extract hyperlinks from the document structure
+      try {
+        const docxResult = await extractFromDOCX(file.buffer)
+        if (docxResult.hyperlinks.length > 0) {
+          documentUrls = [...new Set([...documentUrls, ...docxResult.hyperlinks.map(h => h.url)])]
+        }
+      } catch {
+        // Hyperlink extraction is best-effort
+      }
+    }
+
     // AI extraction
     let extracted
     try {
@@ -70,8 +84,11 @@ router.post(
       throw new AppError(500, `AI extraction failed: ${message}`)
     }
 
-    // Populate career profile collections for generation pipeline
-    await saveExtractedProfile(req.userId, extracted)
+    // Attach extracted URLs to the profile output
+    extracted.extractedUrls = documentUrls
+
+    // Populate career profile collections for generation pipeline (append-only merge)
+    const mergeResult = await mergeProfile(req.userId, extracted)
 
     // Build content object matching UploadedResume schema
     const content = {
@@ -123,7 +140,7 @@ router.post(
       content,
     })
 
-    sendSuccess(res, { resume }, 201)
+    sendSuccess(res, { resume, merge: mergeResult }, 201)
   },
 )
 

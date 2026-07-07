@@ -203,14 +203,14 @@ describe('mergeAcronymSkills (via extractProfileFromPDF output)', () => {
   })
 })
 
-// ---------- 4. cleanExtractedText removes page numbers and URLs ----------
+// ---------- 4. cleanExtractedText removes page numbers, preserves URLs ----------
 
 describe('cleanExtractedText (via prompt sent to AI)', () => {
-  it('strips page-number markers and standalone URLs before sending to the AI', async () => {
+  it('strips page-number markers but preserves URLs before sending to the AI', async () => {
     const dirtyText = [
       'John Doe',
       'Page 1',
-      'https://example.com/should-be-stripped',
+      'https://example.com/should-be-preserved',
       '2 / 10',
       'Real content paragraph with enough length to pass the empty-text guard.',
       'extra@example.com',
@@ -235,8 +235,8 @@ describe('cleanExtractedText (via prompt sent to AI)', () => {
     expect(sentPrompt).not.toMatch(/Page 1/)
     expect(sentPrompt).not.toMatch(/\b2 \/ 10\b/)
 
-    // The standalone URL line should have been removed
-    expect(sentPrompt).not.toMatch(/https:\/\/example\.com\/should-be-stripped/)
+    // URLs should now be preserved (M1 fix)
+    expect(sentPrompt).toMatch(/https:\/\/example\.com\/should-be-preserved/)
 
     // Real content must still be there
     expect(sentPrompt).toContain('Real content paragraph')
