@@ -20,4 +20,9 @@ export const config = {
   aiBaseUrl: process.env.AI_BASE_URL || 'https://openrouter.ai/api/v1',
   ollamaUrl: process.env.OLLAMA_URL || 'http://localhost:11434',
   ollamaModel: process.env.OLLAMA_MODEL || 'qwen2.5:3b',
+  // Email
+  resendApiKey: process.env.RESEND_API_KEY || '',
+  resendFrom: process.env.RESEND_FROM || 'noreply@applyflow.ai',
+  // Apify job scraper
+  apifyApiToken: process.env.APIFY_API_TOKEN || '',
 }

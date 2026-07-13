@@ -3,7 +3,12 @@ import cors from 'cors'
 import helmet from 'helmet'
 import mongoose from 'mongoose'
 import cookieParser from 'cookie-parser'
+import morgan from 'morgan'
 import { config } from './config'
+import { generalLimiter, authWriteLimiter, aiLimiter } from './middleware/rateLimit'
+import { logger } from './utils/logger'
+import { csrfProtection } from './middleware/csrf'
+import docsRouter from './docs/swagger'
 
 const app = express()
 
@@ -29,6 +34,42 @@ app.use(cors({
 }))
 app.use(express.json())
 app.use(cookieParser())
+
+// Morgan HTTP request logging — streams into winston
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev', {
+  stream: {
+    write: (message: string) => logger.http(message.trim()),
+  },
+  skip: (req, res) => {
+    // Skip health check noise in production
+    if (process.env.NODE_ENV === 'production' && req.path === '/api/health') {
+      return res.statusCode < 400
+    }
+    return false
+  },
+}))
+
+// Swagger UI & API docs
+app.use(docsRouter)
+
+// Rate limiting — applied BEFORE routes
+// Auth write limiter only on sensitive mutation routes (login, register, dev-login)
+app.use('/api/auth/login', authWriteLimiter)
+app.use('/api/auth/register', authWriteLimiter)
+app.use('/api/auth/dev-login', authWriteLimiter)
+// AI limiter on all AI-consuming endpoints
+app.use('/api/jd', aiLimiter)
+app.use('/api/resume', aiLimiter)
+app.use('/api/content', aiLimiter)
+app.use('/api/strategy', aiLimiter)
+app.use('/api/interview', aiLimiter)
+app.use('/api/v1/engine', aiLimiter)
+app.use('/api/v1/applications', aiLimiter)
+// Global rate limit for everything else
+app.use(generalLimiter)
+
+// CSRF protection — applied BEFORE all state-changing API routes
+app.use('/api', csrfProtection)
 
 // Health
 app.get('/api/health', (_req, res) => {
