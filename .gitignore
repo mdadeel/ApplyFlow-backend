@@ -4,3 +4,6 @@ dist/
 
 # Logs
 /logs/
+
+# Local data
+.data/

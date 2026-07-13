@@ -26,14 +26,21 @@ export class OpenAIAIProvider implements AIProvider {
     temperature: number = config.aiTemperature,
     formatJson: boolean = false,
   ): Promise<string> {
-    const res = await this.client.chat.completions.create({
-      model: this.model,
-      messages: [this.systemContext, ...messages],
-      temperature,
-      ...(formatJson ? { response_format: { type: 'json_object' as const } } : {}),
-    })
-
-    return (res.choices?.[0]?.message?.content ?? '').trim()
+    try {
+      const res = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [this.systemContext, ...messages],
+        temperature,
+        max_tokens: 4096,
+        user: 'applyflow-system',
+        ...(formatJson ? { response_format: { type: 'json_object' as const } } : {}),
+      })
+  
+      return (res.choices?.[0]?.message?.content ?? '').trim()
+    } catch (error: any) {
+      console.error(`[OpenAI] API Error: ${error?.message || 'Unknown error'}`)
+      throw new Error(`OpenAI API request failed: ${error?.message || 'Unknown error'}`)
+    }
   }
 
   private extractJson<T = any>(text: string): T | null {
@@ -41,7 +48,7 @@ export class OpenAIAIProvider implements AIProvider {
     try {
       return JSON.parse(text) as T
     } catch {
-      const match = text.match(/\{[\s\S]*\}/)
+      const match = text.match(/(\{|\[)[\s\S]*(\}|\])/)
       if (match) {
         try {
           return JSON.parse(match[0]) as T
@@ -186,7 +193,7 @@ Profile background: ${JSON.stringify(profile?.experiences?.slice?.(0, 2) || [])}
   }
 
   async validateHumanization(text: string) {
-    const prompt = `Evaluate how human-sounding the following text is on a 0-100 scale. Look for AI-typical patterns: em dashes, buzzwords, generic filler, overly balanced structure. Return ONLY valid JSON: {"score": <0-100>, "passed": <true|false if score>=70>, "issues": [{"severity": "low"|"medium"|"high", "message": "...", "location": "..."}]}.
+    const prompt = `Evaluate how human-sounding the following text is on a 0-100 scale. Look for AI-typical patterns: em dashes, buzzwords, generic filler, overly balanced structure. Return ONLY valid JSON: {"score": [0-100], "passed": [true|false if score>=70], "issues": [{"severity": "low"|"medium"|"high", "message": "...", "location": "..."}]}.
 
 Text:
 ${text}`
@@ -209,7 +216,7 @@ ${text}`
   }
 
   async validateRecruiter(text: string) {
-    const prompt = `Evaluate the following text as if you are a recruiter screening a candidate's application. Score 0-100 based on clarity, relevance, specificity, and impact. Return ONLY valid JSON: {"score": <0-100>, "passed": <true|false if score>=70>, "issues": [{"severity": "low"|"medium"|"high", "message": "...", "location": "..."}]}.
+    const prompt = `Evaluate the following text as if you are a recruiter screening a candidate's application. Score 0-100 based on clarity, relevance, specificity, and impact. Return ONLY valid JSON: {"score": [0-100], "passed": [true|false if score>=70], "issues": [{"severity": "low"|"medium"|"high", "message": "...", "location": "..."}]}.
 
 Text:
 ${text}`
@@ -232,7 +239,7 @@ ${text}`
   }
 
   async checkGrammar(text: string) {
-    const prompt = `Check the following text for grammar, spelling, and punctuation issues. Return ONLY valid JSON: {"score": <0-100>, "passed": <true|false if score>=80>, "issues": [{"severity": "low"|"medium"|"high", "message": "...", "location": "..."}]}.
+    const prompt = `Check the following text for grammar, spelling, and punctuation issues. Return ONLY valid JSON: {"score": [0-100], "passed": [true|false if score>=80], "issues": [{"severity": "low"|"medium"|"high", "message": "...", "location": "..."}]}.
 
 Text:
 ${text}`

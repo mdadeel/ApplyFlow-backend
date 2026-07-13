@@ -216,6 +216,7 @@ export async function extractProfileFromPDF(text: string): Promise<ExtractedProf
 
   const prompt = `You are a resume parser. Extract the following information from the text into a clean JSON format.
 Ensure you return ONLY valid JSON.
+Do not wrap the JSON in markdown code fences and do not add any commentary before or after the JSON object.
 
 REQUIRED JSON STRUCTURE:
 {
@@ -266,6 +267,7 @@ RULES:
 - Do not invent data. If a section is missing, use an empty array or null.
 - Include all bullet points verbatim in 'responsibilities' or 'features'.
 - Extract URLs explicitly into the 'links' arrays if they are present in the text.
+- Be concise. If the resume has many repetitive items (e.g., 20+ skills with similar levels), you may group them or abbreviate rather than listing every detail.
 
 Resume text to parse:
 ${trimmed}`
@@ -595,26 +597,170 @@ function mergeAcronymSkills(skills: ExtractedSkill[]): ExtractedSkill[] {
 
 export function parseJsonLoose(text: string): any | null {
   if (!text) return null
-  const trimmed = text.trim()
-  try {
-    return JSON.parse(trimmed)
-  } catch {
-    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
-    if (fenced) {
-      try {
-        return JSON.parse(fenced[1].trim())
-      } catch {
-        // fall through
-      }
-    }
-    const match = trimmed.match(/\{[\s\S]*\}/)
-    if (match) {
-      try {
-        return JSON.parse(match[0])
-      } catch {
-        return null
-      }
-    }
-    return null
+
+  // Strip a leading UTF-8 BOM, then trim whitespace.
+  let trimmed = text.replace(/^\uFEFF/, '').trim()
+
+  // ---- Attempt 1: direct parse ----
+  const direct = tryParse(trimmed)
+  if (direct.ok) return direct.value
+
+  // ---- Attempt 2: strip markdown code fences (```json ... ``` or ``` ... ```) ----
+  const fenceRegex = /^```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/i
+  const fenced = trimmed.match(fenceRegex)
+  if (fenced) {
+    const inner = fenced[1].trim()
+    const fenceParsed = tryParse(inner)
+    if (fenceParsed.ok) return fenceParsed.value
   }
+
+  // ---- Attempt 3: extract the first balanced {...} block ----
+  const balanced = extractBalancedObject(trimmed)
+  if (balanced !== null) {
+    const balancedParsed = tryParse(balanced)
+    if (balancedParsed.ok) return balancedParsed.value
+
+    // ---- Attempt 4: apply repairs to the candidate ----
+    // Repair A: remove trailing commas before } or ]
+    const noTrailingCommas = balanced.replace(/,(\s*[}\]])/g, '$1')
+    const noTrailingCommasParsed = tryParse(noTrailingCommas)
+    if (noTrailingCommasParsed.ok) return noTrailingCommasParsed.value
+
+    // Repair B: escape unescaped newlines/CR inside double-quoted strings,
+    // and strip control characters except \t, \n, \r.
+    const repairedStrings = escapeUnescapedStringChars(noTrailingCommas)
+    const repairedStringsParsed = tryParse(repairedStrings)
+    if (repairedStringsParsed.ok) return repairedStringsParsed.value
+
+    // Repair C: strip control characters (excluding \t, \n, \r) and try again.
+    const strippedControls = repairedStrings.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    const strippedControlsParsed = tryParse(strippedControls)
+    if (strippedControlsParsed.ok) return strippedControlsParsed.value
+  }
+
+  // ---- Failure: log the full (or truncated) raw text for diagnosis ----
+  const MAX_LOG_BYTES = 50 * 1024
+  if (trimmed.length <= MAX_LOG_BYTES) {
+    console.error(`[pdfExtractor] Full unparseable Ollama response:\n${trimmed}`)
+  } else {
+    console.error(
+      `[pdfExtractor] Full unparseable Ollama response (first ${MAX_LOG_BYTES} of ${trimmed.length} chars):\n` +
+        trimmed.slice(0, MAX_LOG_BYTES)
+    )
+  }
+  return null
+}
+
+function tryParse(candidate: string): { ok: true; value: any } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(candidate) }
+  } catch {
+    return { ok: false }
+  }
+}
+
+/**
+ * Find the first '{' in `text` and walk forward, tracking brace depth while
+ * ignoring braces that appear inside double-quoted strings (with `\"` escapes).
+ * Returns the substring from the opening '{' to its matching closing '}', or
+ * `null` if no balanced object is found.
+ */
+function extractBalancedObject(text: string): string | null {
+  const start = text.indexOf('{')
+  if (start === -1) return null
+
+  let depth = 0
+  let inString = false
+  let escapeNext = false
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]
+
+    if (escapeNext) {
+      escapeNext = false
+      continue
+    }
+
+    if (inString) {
+      if (ch === '\\') {
+        escapeNext = true
+        continue
+      }
+      if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+
+    if (ch === '{') {
+      depth++
+      continue
+    }
+
+    if (ch === '}') {
+      depth--
+      if (depth === 0) {
+        return text.slice(start, i + 1)
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Walk the input and, inside any double-quoted JSON string, escape raw newline
+ * and carriage-return characters (LLMs sometimes embed literal line breaks in
+ * string values). Control characters outside of strings are left untouched
+ * here; the caller handles them with a separate pass.
+ */
+function escapeUnescapedStringChars(input: string): string {
+  let out = ''
+  let inString = false
+  let escapeNext = false
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]
+
+    if (escapeNext) {
+      out += ch
+      escapeNext = false
+      continue
+    }
+
+    if (inString) {
+      if (ch === '\\') {
+        out += ch
+        escapeNext = true
+        continue
+      }
+      if (ch === '"') {
+        inString = false
+        out += ch
+        continue
+      }
+      if (ch === '\n') {
+        out += '\\n'
+        continue
+      }
+      if (ch === '\r') {
+        out += '\\r'
+        continue
+      }
+      out += ch
+      continue
+    }
+
+    if (ch === '"') {
+      inString = true
+    }
+    out += ch
+  }
+
+  return out
 }

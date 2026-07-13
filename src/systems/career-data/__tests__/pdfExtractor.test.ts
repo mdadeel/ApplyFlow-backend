@@ -19,7 +19,7 @@ jest.mock('../../ai', () => ({
 
 // ---------- Imports ----------
 
-import { extractProfileFromPDF } from '../pdfExtractor'
+import { extractProfileFromPDF, parseJsonLoose } from '../pdfExtractor'
 
 // ---------- Setup ----------
 
@@ -240,5 +240,91 @@ describe('cleanExtractedText (via prompt sent to AI)', () => {
 
     // Real content must still be there
     expect(sentPrompt).toContain('Real content paragraph')
+  })
+})
+
+// ---------- 5. parseJsonLoose handles common LLM JSON corruption ----------
+
+describe('parseJsonLoose', () => {
+  it('returns the parsed object for a plain valid JSON object', () => {
+    const input = '{"name":"Jane","experiences":[],"skills":[]}'
+    const result = parseJsonLoose(input)
+    expect(result).toEqual({ name: 'Jane', experiences: [], skills: [] })
+  })
+
+  it('parses JSON wrapped in ```json ... ``` code fences', () => {
+    const input = '```json\n{"name":"Jane","skills":[{"name":"TS"}]}\n```'
+    const result = parseJsonLoose(input)
+    expect(result).toEqual({ name: 'Jane', skills: [{ name: 'TS' }] })
+  })
+
+  it('parses JSON wrapped in ``` ... ``` (no language hint) code fences', () => {
+    const input = '```\n{"name":"Jane"}\n```'
+    const result = parseJsonLoose(input)
+    expect(result).toEqual({ name: 'Jane' })
+  })
+
+  it('parses JSON followed by explanatory text', () => {
+    const input =
+      'Here is the parsed resume:\n{"name":"Jane","skills":[],"experiences":[]}\nHope this helps!'
+    const result = parseJsonLoose(input)
+    expect(result).toEqual({ name: 'Jane', skills: [], experiences: [] })
+  })
+
+  it('repairs JSON with unescaped newlines inside string values', () => {
+    // Simulate an LLM emitting literal newlines inside a string value.
+    const input =
+      '{"name":"Jane","summary":"Line one.\nLine two.\nLine three.","skills":[]}'
+    const result = parseJsonLoose(input)
+    expect(result).toEqual({
+      name: 'Jane',
+      summary: 'Line one.\nLine two.\nLine three.',
+      skills: [],
+    })
+  })
+
+  it('repairs JSON with trailing commas before } or ]', () => {
+    const input = '{"name":"Jane","skills":[{"name":"TS",},],}'
+    const result = parseJsonLoose(input)
+    expect(result).toEqual({ name: 'Jane', skills: [{ name: 'TS' }] })
+  })
+
+  it('returns null for completely invalid / non-JSON text', () => {
+    expect(parseJsonLoose('not json at all')).toBeNull()
+    expect(parseJsonLoose('')).toBeNull()
+    // Verify console.error is called with the diagnostic prefix on failure.
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(parseJsonLoose('still not json { broken')).toBeNull()
+      expect(errSpy).toHaveBeenCalled()
+      const firstCallMsg = String(errSpy.mock.calls[0]?.[0] ?? '')
+      expect(firstCallMsg).toContain('[pdfExtractor]')
+    } finally {
+      errSpy.mockRestore()
+    }
+  })
+
+  it('strips a leading UTF-8 BOM before parsing', () => {
+    const input = '\uFEFF{"name":"Jane"}'
+    const result = parseJsonLoose(input)
+    expect(result).toEqual({ name: 'Jane' })
+  })
+
+  it('extracts the first balanced object and ignores a trailing brace-only fragment', () => {
+    // Without proper brace-counting, a greedy regex would match the whole
+    // string including the stray '}' at the end. The parser must stop at the
+    // first balanced object.
+    const input = 'noise {"a":1,"b":{"c":2}} extra }'
+    const result = parseJsonLoose(input)
+    expect(result).toEqual({ a: 1, b: { c: 2 } })
+  })
+
+  it('ignores braces that appear inside double-quoted strings', () => {
+    const input = '{"name":"Jane {not real} Doe","meta":"{also not}"}'
+    const result = parseJsonLoose(input)
+    expect(result).toEqual({
+      name: 'Jane {not real} Doe',
+      meta: '{also not}',
+    })
   })
 })

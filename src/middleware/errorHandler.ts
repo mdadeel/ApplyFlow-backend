@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express'
+import { logger } from '../utils/logger'
 
 /**
  * Custom error with HTTP status code and optional metadata.
@@ -24,7 +25,7 @@ export class AppError extends Error {
  */
 export function errorHandler(
   err: Error,
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction,
 ): void {
@@ -38,7 +39,6 @@ export function errorHandler(
     message = err.message
     data = err.data
   } else if (err.name === 'ZodError') {
-    // Catches Zod validation errors thrown from identity routes
     statusCode = 400
     message = 'Validation failed'
     data = (err as any).errors ?? (err as any).issues
@@ -50,12 +50,22 @@ export function errorHandler(
     message = err.message
   }
 
-  // Log in development
-  if (process.env.NODE_ENV !== 'production') {
-    console.error(`[${statusCode}] ${message}`)
-    if (statusCode === 500) {
-      console.error(err.stack)
-    }
+  // Log every error with structured metadata
+  const logMeta = {
+    statusCode,
+    method: req.method,
+    path: req.path,
+    ip: req.ip,
+    userAgent: req.get('user-agent') || 'unknown',
+    userId: (req as any).userId || 'anonymous',
+  }
+
+  if (statusCode >= 500) {
+    logger.error(`[${statusCode}] ${message}`, { ...logMeta, stack: err.stack })
+  } else if (statusCode >= 400) {
+    logger.warn(`[${statusCode}] ${message}`, logMeta)
+  } else {
+    logger.info(`[${statusCode}] ${message}`, logMeta)
   }
 
   // Build response

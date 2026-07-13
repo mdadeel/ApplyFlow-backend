@@ -40,6 +40,13 @@ export interface IUser extends Document {
   yearsOfExperience?: number
   currentRole?: string
   currentCompany?: string
+  // Email verification
+  isVerified: boolean
+  verificationToken?: string
+  verificationTokenExpires?: Date
+  // Password reset
+  passwordResetToken?: string
+  passwordResetExpires?: Date
   createdAt: Date
   updatedAt: Date
 }
@@ -84,6 +91,13 @@ const userSchema = new Schema<IUser>({
   yearsOfExperience: { type: Number, min: 0 },
   currentRole: { type: String, trim: true, maxlength: 200 },
   currentCompany: { type: String, trim: true, maxlength: 200 },
+  // Email verification
+  isVerified: { type: Boolean, default: false },
+  verificationToken: { type: String },
+  verificationTokenExpires: { type: Date },
+  // Password reset
+  passwordResetToken: { type: String },
+  passwordResetExpires: { type: Date },
 }, { timestamps: true })
 
 userSchema.set('toJSON', {

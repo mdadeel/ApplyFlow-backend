@@ -12,7 +12,7 @@ import { JDAnalysis } from '../src/models/JDAnalysis'
 import { Application } from '../src/models/Application'
 
 // ── Config ─────────────────────────────────────────────────────────────────
-const MONGODB_URI = process.env.MONGODB_URI
+const MONGODB_URI = process.env.MONGODB_URI || ''
 if (!MONGODB_URI) {
   console.error('MONGODB_URI is not set in environment')
   process.exit(1)

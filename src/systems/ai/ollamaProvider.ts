@@ -28,10 +28,10 @@ export class OllamaAIProvider implements AIProvider {
       model: this.model,
       prompt,
       stream: false,
-      options: { 
+      options: {
         temperature,
-        num_predict: 8192,
-        num_ctx: 16384
+        num_predict: 32768,
+        num_ctx: 32768
       },
     }
     
@@ -61,8 +61,8 @@ export class OllamaAIProvider implements AIProvider {
     try {
       return JSON.parse(text) as T
     } catch {
-      // Try to extract the first JSON object from the response
-      const match = text.match(/\{[\s\S]*\}/)
+      // Try to extract the first JSON object or array from the response
+      const match = text.match(/(\{|\[)[\s\S]*(\}|\])/)
       if (match) {
         try {
           return JSON.parse(match[0]) as T
@@ -205,7 +205,7 @@ Profile background: ${JSON.stringify(profile?.experiences?.slice?.(0, 2) || [])}
   }
 
   async validateHumanization(text: string) {
-    const prompt = `Evaluate how human-sounding the following text is on a 0-100 scale. Look for AI-typical patterns: em dashes, buzzwords, generic filler, overly balanced structure. Return ONLY valid JSON: {"score": <0-100>, "passed": <true|false if score>=70>, "issues": [{"severity": "low"|"medium"|"high", "message": "...", "location": "..."}]}.
+    const prompt = `Evaluate how human-sounding the following text is on a 0-100 scale. Look for AI-typical patterns: em dashes, buzzwords, generic filler, overly balanced structure. Return ONLY valid JSON: {"score": [0-100], "passed": [true|false if score>=70], "issues": [{"severity": "low"|"medium"|"high", "message": "...", "location": "..."}]}.
 
 Text:
 ${text}`
@@ -228,7 +228,7 @@ ${text}`
   }
 
   async validateRecruiter(text: string) {
-    const prompt = `Evaluate the following text as if you are a recruiter screening a candidate's application. Score 0-100 based on clarity, relevance, specificity, and impact. Return ONLY valid JSON: {"score": <0-100>, "passed": <true|false if score>=70>, "issues": [{"severity": "low"|"medium"|"high", "message": "...", "location": "..."}]}.
+    const prompt = `Evaluate the following text as if you are a recruiter screening a candidate's application. Score 0-100 based on clarity, relevance, specificity, and impact. Return ONLY valid JSON: {"score": [0-100], "passed": [true|false if score>=70], "issues": [{"severity": "low"|"medium"|"high", "message": "...", "location": "..."}]}.
 
 Text:
 ${text}`
@@ -251,7 +251,7 @@ ${text}`
   }
 
   async checkGrammar(text: string) {
-    const prompt = `Check the following text for grammar, spelling, and punctuation issues. Return ONLY valid JSON: {"score": <0-100>, "passed": <true|false if score>=80>, "issues": [{"severity": "low"|"medium"|"high", "message": "...", "location": "..."}]}.
+    const prompt = `Check the following text for grammar, spelling, and punctuation issues. Return ONLY valid JSON: {"score": [0-100], "passed": [true|false if score>=80], "issues": [{"severity": "low"|"medium"|"high", "message": "...", "location": "..."}]}.
 
 Text:
 ${text}`

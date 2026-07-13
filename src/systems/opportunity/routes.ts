@@ -2,6 +2,9 @@ import { Router, Request, Response } from 'express'
 import { sessionGuard } from '../identity/sessionGuard'
 import { AppError } from '../../middleware/errorHandler'
 import { sendSuccess } from '../../utils/response'
+import { apifyLimiter } from '../../middleware/rateLimit'
+import { User } from '../../models/User'
+import { scrapeAndAddToFeed } from '../../services/apifyScraper'
 import {
   createOpportunitySchema,
   updateOpportunitySchema,
@@ -93,6 +96,31 @@ router.delete('/:id', sessionGuard, async (req: Request, res: Response) => {
   } catch (err) {
     throw new AppError(404, err instanceof Error ? err.message : 'Opportunity not found')
   }
+})
+
+/**
+ * POST /api/opportunities/scrape-matches
+ *
+ * Triggers an Apify LinkedIn scrape derived from the authenticated user's
+ * profile (preferredRoles, skills, location, openToRemote). Returns 202
+ * immediately; results become visible in the feed once the ingestion worker
+ * processes the newly created 'pending' Opportunity records (~30–90 s).
+ */
+router.post('/scrape-matches', sessionGuard, apifyLimiter, async (req: Request, res: Response) => {
+  const userId = req.userId!
+
+  const user = await User.findById(userId)
+  if (!user) throw new AppError(404, 'User not found')
+
+  // Fire-and-forget — client does not wait for the Apify actor to finish
+  scrapeAndAddToFeed(userId, user).catch((err: Error) => {
+    // Logged inside the service; nothing to surface to the client at this point
+    console.error(`[scrape-matches] background scrape failed for user ${userId}: ${err.message}`)
+  })
+
+  sendSuccess(res, {
+    message: 'Job scrape started. New opportunities will appear in your feed within 1–2 minutes.',
+  }, 202)
 })
 
 export default router

@@ -5,8 +5,14 @@ import { Project } from '../../models/Project'
 import { Skill } from '../../models/Skill'
 import { Education } from '../../models/Education'
 import { Certificate } from '../../models/Certificate'
+import { Award } from '../../models/Award'
+import { Publication } from '../../models/Publication'
+import { Volunteering } from '../../models/Volunteering'
+import { Language } from '../../models/Language'
+import { Interest } from '../../models/Interest'
 import { createCrudRoutes } from './crudFactory'
 import { personalInfoRouter } from './personalInfo'
+import { getFullProfile } from './profileService'
 import { sessionGuard } from '../identity/sessionGuard'
 import { AppError } from '../../middleware/errorHandler'
 import { sendSuccess } from '../../utils/response'
@@ -33,8 +39,25 @@ router.use('/projects', createCrudRoutes('projects', Project))
 router.use('/skills', createCrudRoutes('skills', Skill))
 router.use('/education', createCrudRoutes('education', Education))
 router.use('/certificates', createCrudRoutes('certificates', Certificate))
+router.use('/awards', createCrudRoutes('awards', Award))
+router.use('/publications', createCrudRoutes('publications', Publication))
+router.use('/volunteering', createCrudRoutes('volunteering', Volunteering))
+router.use('/languages', createCrudRoutes('languages', Language))
+router.use('/interests', createCrudRoutes('interests', Interest))
 router.use('/personal', personalInfoRouter)
 router.use('/resumes', resumeRoutes)
+
+router.get('/all', sessionGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const profile = await getFullProfile(req.userId)
+    if (!profile) {
+      throw new AppError(404, 'Profile not found')
+    }
+    sendSuccess(res, profile)
+  } catch (error) {
+    next(error)
+  }
+})
 
 router.post('/upload-pdf', sessionGuard, pdfUpload.single('resume'), async (req: Request, res: Response, next: NextFunction) => {
   try {

@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express'
+import crypto from 'crypto'
 import { User } from '../../models/User'
 import { Notification } from '../../models/Notification'
 import { Application } from '../../models/Application'
@@ -10,6 +11,7 @@ import { ValidationReport } from '../../models/ValidationReport'
 import { ExportRecord } from '../../models/ExportRecord'
 import { hashPassword, verifyPassword, generateToken, SESSION_COOKIE, sessionCookieOptions } from './credentialManager'
 import { verifyGoogleToken, verifyGithubCode, verifyLinkedInCode } from './oauthGateway'
+import { ensureCsrfToken, rotateCsrfToken } from '../../middleware/csrf'
 import { sessionGuard } from './sessionGuard'
 import { getPreferences, updatePreferences, redactApiKeys } from './preferenceStore'
 import {
@@ -25,6 +27,7 @@ import { AppError } from '../../middleware/errorHandler'
 import { sendSuccess } from '../../utils/response'
 import { config } from '../../config'
 import { validate } from '../../middleware/validate'
+import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from '../../services/email'
 
 const router = Router()
 
@@ -58,18 +61,21 @@ function frontendRedirect(provider: 'github' | 'linkedin', status: 'connected' |
   return `${config.frontendUrl}/settings?${params.toString()}`
 }
 
-router.post('/register', async (req, res: Response) => {
+router.post('/register', ensureCsrfToken, async (req, res: Response) => {
   const data = registerSchema.parse(req.body)
 
   const existing = await User.findOne({ email: data.email })
   if (existing) throw new AppError(409, 'Email already registered')
 
   const hashedPassword = await hashPassword(data.password)
+  const verificationToken = crypto.randomBytes(32).toString('hex')
   const user = await User.create({
     email: data.email,
     password: hashedPassword,
     name: data.name,
     authProvider: 'email',
+    verificationToken,
+    verificationTokenExpires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
   })
 
   try {
@@ -84,12 +90,18 @@ router.post('/register', async (req, res: Response) => {
     console.error('Failed to create welcome notification:', err)
   }
 
+  // Send verification email (non-blocking — don't fail registration if email fails)
+  sendVerificationEmail(user.email, verificationToken)
+
+  // Rotate CSRF token on new session
+  rotateCsrfToken(req, res)
+
   const token = generateToken(String(user._id))
   setSessionCookie(res, token)
   sendSuccess(res, { user: user.toJSON() }, 201)
 })
 
-router.post('/login', async (req, res: Response) => {
+router.post('/login', ensureCsrfToken, async (req, res: Response) => {
   const data = loginSchema.parse(req.body)
 
   const user = await User.findOne({ email: data.email })
@@ -98,12 +110,15 @@ router.post('/login', async (req, res: Response) => {
   const valid = await verifyPassword(data.password, user.password)
   if (!valid) throw new AppError(401, 'Invalid email or password')
 
+  // Rotate CSRF token on new session
+  rotateCsrfToken(req, res)
+
   const token = generateToken(String(user._id))
   setSessionCookie(res, token)
   sendSuccess(res, { user: user.toJSON() })
 })
 
-router.post('/google', async (req, res: Response) => {
+router.post('/google', ensureCsrfToken, async (req, res: Response) => {
   const data = googleAuthSchema.parse(req.body)
   let oauthUser
   try {
@@ -122,29 +137,34 @@ router.post('/google', async (req, res: Response) => {
     })
   }
 
+  rotateCsrfToken(req, res)
   const token = generateToken(String(user._id))
   setSessionCookie(res, token)
   sendSuccess(res, { user: user.toJSON() })
 })
 
-router.post('/dev-login', async (_req, res: Response) => {
-  let user = await User.findOne({ email: 'dev@applyflow.ai' })
-  if (!user) {
-    const hashedPassword = await hashPassword('devpassword123')
-    user = await User.create({
-      email: 'dev@applyflow.ai',
-      password: hashedPassword,
-      name: 'Dev User',
-      authProvider: 'email',
-      onboardingComplete: true,
-    })
-  }
-  const token = generateToken(String(user._id))
-  setSessionCookie(res, token)
-  sendSuccess(res, { user: user.toJSON() })
-})
+// Dev-login only available in development mode
+if (process.env.NODE_ENV !== 'production') {
+  router.post('/dev-login', ensureCsrfToken, async (req, res: Response) => {
+    let user = await User.findOne({ email: 'dev@applyflow.ai' })
+    if (!user) {
+      const hashedPassword = await hashPassword('devpassword123')
+      user = await User.create({
+        email: 'dev@applyflow.ai',
+        password: hashedPassword,
+        name: 'Dev User',
+        authProvider: 'email',
+        onboardingComplete: true,
+      })
+    }
+    rotateCsrfToken(req, res)
+    const token = generateToken(String(user._id))
+    setSessionCookie(res, token)
+    sendSuccess(res, { user: user.toJSON() })
+  })
+}
 
-router.post('/github', async (req, res: Response) => {
+router.post('/github', ensureCsrfToken, async (req, res: Response) => {
   const data = githubAuthSchema.parse(req.body)
   let oauthUser
   try {
@@ -163,6 +183,7 @@ router.post('/github', async (req, res: Response) => {
     })
   }
 
+  rotateCsrfToken(req, res)
   const token = generateToken(String(user._id))
   setSessionCookie(res, token)
   sendSuccess(res, { user: user.toJSON() })
@@ -261,6 +282,107 @@ router.delete('/api-key/:provider', sessionGuard, async (req: Request, res: Resp
   sendSuccess(res, redactApiKeys(preferences))
 })
 
+// ── Email verification ──────────────────────────────────────────────
+
+router.post('/verify-email', async (req: Request, res: Response) => {
+  const { token } = req.body
+  if (!token || typeof token !== 'string') {
+    throw new AppError(400, 'Verification token is required')
+  }
+
+  const user = await User.findOne({
+    verificationToken: token,
+    verificationTokenExpires: { $gt: new Date() },
+  })
+
+  if (!user) {
+    throw new AppError(400, 'Invalid or expired verification token')
+  }
+
+  user.isVerified = true
+  user.verificationToken = undefined
+  user.verificationTokenExpires = undefined
+  await user.save()
+
+  // Send a welcome email on successful verification
+  sendWelcomeEmail(user.email, user.name)
+
+  sendSuccess(res, { ok: true, message: 'Email verified successfully' })
+})
+
+router.post('/resend-verification', sessionGuard, async (req: Request, res: Response) => {
+  const user = await User.findById(req.userId)
+  if (!user) throw new AppError(404, 'User not found')
+  if (user.isVerified) {
+    throw new AppError(400, 'Email is already verified')
+  }
+
+  const verificationToken = crypto.randomBytes(32).toString('hex')
+  user.verificationToken = verificationToken
+  user.verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000)
+  await user.save()
+
+  await sendVerificationEmail(user.email, verificationToken)
+
+  sendSuccess(res, { ok: true, message: 'Verification email sent' })
+})
+
+// ── Password reset ──────────────────────────────────────────────────
+
+router.post('/forgot-password', async (req: Request, res: Response) => {
+  const { email } = req.body
+  if (!email || typeof email !== 'string') {
+    throw new AppError(400, 'Email is required')
+  }
+
+  const user = await User.findOne({ email: email.toLowerCase().trim() })
+
+  // Always return success to prevent email enumeration
+  if (!user || !user.password) {
+    sendSuccess(res, { message: 'If that email exists, a password reset link has been sent.' })
+    return
+  }
+
+  const resetToken = crypto.randomBytes(32).toString('hex')
+  user.passwordResetToken = resetToken
+  user.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000) // 1 hour
+  await user.save()
+
+  await sendPasswordResetEmail(user.email, resetToken)
+
+  sendSuccess(res, { message: 'If that email exists, a password reset link has been sent.' })
+})
+
+router.post('/reset-password', async (req: Request, res: Response) => {
+  const { token, newPassword } = req.body
+  if (!token || typeof token !== 'string') {
+    throw new AppError(400, 'Reset token is required')
+  }
+  if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+    throw new AppError(400, 'Password must be at least 6 characters')
+  }
+
+  const user = await User.findOne({
+    passwordResetToken: token,
+    passwordResetExpires: { $gt: new Date() },
+  })
+
+  if (!user) {
+    throw new AppError(400, 'Invalid or expired reset token')
+  }
+
+  user.password = await hashPassword(newPassword)
+  user.passwordResetToken = undefined
+  user.passwordResetExpires = undefined
+  await user.save()
+
+  // Create a new session so the user is logged in after reset
+  const jwtToken = generateToken(String(user._id))
+  setSessionCookie(res, jwtToken)
+
+  sendSuccess(res, { ok: true, message: 'Password reset successfully' })
+})
+
 // ── Integration OAuth (popup flow) ─────────────────────────────────────────
 
 router.get('/integrations/status', (_req, res: Response) => {
@@ -321,6 +443,7 @@ router.get('/linkedin/callback', async (req: Request, res: Response) => {
       await user.save()
     }
 
+    rotateCsrfToken(req, res)
     const token = generateToken(String(user._id))
     // Set the session cookie on the popup response so it's available
     // when the popup redirects back to the frontend.
@@ -381,6 +504,7 @@ router.get('/github/callback', async (req: Request, res: Response) => {
       await user.save()
     }
 
+    rotateCsrfToken(req, res)
     const token = generateToken(String(user._id))
     // Set the session cookie on the popup response so it's available
     // when the popup redirects back to the frontend.

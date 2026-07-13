@@ -10,6 +10,11 @@ const singular: Record<string, string> = {
   skills: 'skill',
   education: 'education',
   certificates: 'certificate',
+  awards: 'award',
+  publications: 'publication',
+  volunteering: 'volunteering',
+  languages: 'language',
+  interests: 'interest',
 }
 
 export function createCrudRoutes<T>(path: string, model: Model<T>): Router {
