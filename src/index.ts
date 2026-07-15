@@ -8,7 +8,39 @@ import { config } from './config'
 import { generalLimiter, authWriteLimiter, aiLimiter } from './middleware/rateLimit'
 import { logger } from './utils/logger'
 import { csrfProtection } from './middleware/csrf'
+import { errorHandler } from './middleware/errorHandler'
 import docsRouter from './docs/swagger'
+
+import identityRoutes from './systems/identity/routes'
+import careerDataRoutes from './systems/career-data/routes'
+import jdRoutes from './systems/job-intelligence/routes'
+import applicationRoutes from './systems/application-management/routes'
+import smartAppRoutes from './systems/smart-application/routes'
+import strategyRoutes from './systems/resume-planning/routes'
+import resumeRoutes from './systems/resume-writing/routes'
+import contentRoutes from './systems/content-generation/routes'
+import validationRoutes from './systems/document-validation/routes'
+import exportRoutes from './systems/export/routes'
+import exportPersistenceRoutes from './systems/export/persistence'
+import interviewRoutes from './systems/interview-intelligence/routes'
+import analyticsRoutes from './systems/analytics/routes'
+import learningRoutes from './systems/learning/routes'
+import notificationRoutes from './systems/notifications/routes'
+import communityRoutes from './systems/community/routes'
+import discussionRoutes from './systems/discussion/routes'
+import opportunityRoutes from './systems/opportunity/routes'
+import contributionRoutes from './systems/contribution/routes'
+import workspaceRoutes from './systems/workspace/routes'
+import recommenderRoutes from './systems/recommender/routes'
+import communityAnalyticsRoutes from './systems/community-analytics/routes'
+import reputationRoutes from './systems/reputation/routes'
+import engineHealthRoutes from './engine/observability/index'
+import engineLearningRoutes from './engine/learning/routes'
+
+import { start as startIngestionWorker } from './workers/opportunity-ingestion'
+import { start as startEmbeddingWorker } from './workers/embedding-refresh'
+import { start as startMatchWorker } from './workers/match-refresh'
+import { start as startDeadlineWorker } from './workers/deadline-alert'
 
 const app = express()
 
@@ -76,93 +108,44 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
 })
 
-import { errorHandler } from './middleware/errorHandler'
-
 // Systems
-import identityRoutes from './systems/identity/routes'
 app.use('/api/auth', identityRoutes)
-
-import careerDataRoutes from './systems/career-data/routes'
 app.use('/api/profile', careerDataRoutes)
-
-import jdRoutes from './systems/job-intelligence/routes'
 app.use('/api/jd', jdRoutes)
-
-import applicationRoutes from './systems/application-management/routes'
 app.use('/api/applications', applicationRoutes)
-
-import smartAppRoutes from './systems/smart-application/routes'
 app.use('/api/v1/applications', smartAppRoutes)
-
-import strategyRoutes from './systems/resume-planning/routes'
 app.use('/api/strategy', strategyRoutes)
-
-import resumeRoutes from './systems/resume-writing/routes'
 app.use('/api/resume', resumeRoutes)
-
-import contentRoutes from './systems/content-generation/routes'
 app.use('/api/content', contentRoutes)
-
-import validationRoutes from './systems/document-validation/routes'
 app.use('/api/validate', validationRoutes)
-
-import exportRoutes from './systems/export/routes'
 app.use('/api/export', exportRoutes)
-
-import exportPersistenceRoutes from './systems/export/persistence'
 app.use('/api/exports', exportPersistenceRoutes)
-
-import interviewRoutes from './systems/interview-intelligence/routes'
 app.use('/api/interview', interviewRoutes)
-
-import analyticsRoutes from './systems/analytics/routes'
 app.use('/api/analytics', analyticsRoutes)
-
-import learningRoutes from './systems/learning/routes'
 app.use('/api/learning', learningRoutes)
-
-import notificationRoutes from './systems/notifications/routes'
 app.use('/api/notifications', notificationRoutes)
-
-import communityRoutes from './systems/community/routes'
 app.use('/api/v1/community', communityRoutes)
-
-import discussionRoutes from './systems/discussion/routes'
 app.use('/api/discussions', discussionRoutes)
-
-import opportunityRoutes from './systems/opportunity/routes'
 app.use('/api/opportunities', opportunityRoutes)
-
-import contributionRoutes from './systems/contribution/routes'
 app.use('/api/opportunities/:opportunityId/contributions', contributionRoutes)
-
-import workspaceRoutes from './systems/workspace/routes'
 app.use('/api/workspaces', workspaceRoutes)
-
-import recommenderRoutes from './systems/recommender/routes'
 app.use('/api', recommenderRoutes)
-
-import communityAnalyticsRoutes from './systems/community-analytics/routes'
 app.use('/api/analytics/community', communityAnalyticsRoutes)
-
-import reputationRoutes from './systems/reputation/routes'
 app.use('/api', reputationRoutes)
 
 // Engine (observability + learning)
-import engineHealthRoutes from './engine/observability/index'
 app.use('/api/v1/engine', engineHealthRoutes)
-
-import engineLearningRoutes from './engine/learning/routes'
 app.use('/api/v1/engine/learning', engineLearningRoutes)
 
-import { start as startIngestionWorker } from './workers/opportunity-ingestion'
-import { start as startEmbeddingWorker } from './workers/embedding-refresh'
-import { start as startMatchWorker } from './workers/match-refresh'
-import { start as startDeadlineWorker } from './workers/deadline-alert'
+// Centralized error handler — must be registered AFTER all routes
+app.use(errorHandler)
+
+let dbConnected = false
 
 async function start() {
   try {
     await mongoose.connect(config.mongodbUri, { serverSelectionTimeoutMS: 3000 })
+    dbConnected = true
     console.log('Connected to MongoDB')
   } catch (err) {
     console.warn('MongoDB not available, running without database:', (err as Error).message)
