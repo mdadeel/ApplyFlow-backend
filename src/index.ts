@@ -85,19 +85,16 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev', {
 app.use(docsRouter)
 
 // Rate limiting — applied BEFORE routes
-// Auth write limiter only on sensitive mutation routes (login, register, dev-login)
 app.use('/api/auth/login', authWriteLimiter)
 app.use('/api/auth/register', authWriteLimiter)
 app.use('/api/auth/dev-login', authWriteLimiter)
-// AI limiter on all AI-consuming endpoints
 app.use('/api/jd', aiLimiter)
 app.use('/api/resume', aiLimiter)
 app.use('/api/content', aiLimiter)
 app.use('/api/strategy', aiLimiter)
 app.use('/api/interview', aiLimiter)
-app.use('/api/v1/engine', aiLimiter)
+app.use('/api/v1/engine/health', aiLimiter)
 app.use('/api/v1/applications', aiLimiter)
-// Global rate limit for everything else
 app.use(generalLimiter)
 
 // CSRF protection — applied BEFORE all state-changing API routes
@@ -153,18 +150,19 @@ async function start() {
 
   const server = app.listen(config.port, () => {
     console.log(`Server running on port ${config.port}`)
-    startIngestionWorker()
-    startEmbeddingWorker()
-    startMatchWorker()
-    startDeadlineWorker()
-    console.log('Background workers started')
+    if (dbConnected) {
+      startIngestionWorker()
+      startEmbeddingWorker()
+      startMatchWorker()
+      startDeadlineWorker()
+      console.log('Background workers started')
+    } else {
+      console.log('Skipping background workers — no database connection')
+    }
   })
   // Increase timeout to 15 minutes to allow for long LLM generation requests
   server.timeout = 900000;
   server.keepAliveTimeout = 900000;
 }
-
-// Centralized error handler — must be registered AFTER all routes
-app.use(errorHandler)
 
 start()
