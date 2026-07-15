@@ -202,6 +202,7 @@ export const feedbackSchema = z.object({
 export const updatePersonalSchema = z.object({
   name: z.string().optional(),
   fullName: z.string().optional(),
+  email: z.string().email().optional(),
   title: z.string().optional(),
   summary: z.string().optional(),
   location: z.string().optional(),

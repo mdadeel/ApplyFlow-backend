@@ -175,7 +175,7 @@ export interface CareerProfile {
 }
 
 export async function getFullProfile(userId: string): Promise<CareerProfile | null> {
-  const user = await User.findById(userId).select('name email').lean()
+  const user = await User.findById(userId).select('name email title summary phone location portfolio linkedIn github').lean()
   if (!user) return null
 
   const [experiences, projects, skills, education, certificates, awards, publications, volunteering, languages, interests] = await Promise.all([
@@ -194,8 +194,15 @@ export async function getFullProfile(userId: string): Promise<CareerProfile | nu
   return {
     personal: {
       name: user.name,
-      email: user.email
-    },
+      email: user.email,
+      title: user.title,
+      summary: user.summary,
+      phone: user.phone,
+      location: user.location,
+      portfolio: user.portfolio,
+      linkedIn: user.linkedIn,
+      github: user.github
+    } as Record<string, string | undefined>,
     experiences: experiences.map(e => ({
       _id: e._id.toString(),
       company: e.company,
