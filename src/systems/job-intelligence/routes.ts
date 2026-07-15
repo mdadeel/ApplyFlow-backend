@@ -15,9 +15,26 @@ import { analyzeJdSchema } from '../../utils/validation'
 const router = Router()
 router.use(sessionGuard)
 
+router.get('/', async (req: Request, res: Response) => {
+  const limit = parseInt(req.query.limit as string, 10) || 20
+  const analyses = await JDAnalysis.find({ userId: req.userId })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .select('_id company role rawText createdAt')
+    .lean()
+  
+  // Frontend expects 'jdText' instead of 'rawText' for this specific model matching
+  const formatted = analyses.map(a => ({
+    ...a,
+    jdText: a.rawText
+  }))
+
+  sendSuccess(res, formatted)
+})
+
 router.post('/analyze', validate(analyzeJdSchema), async (req: Request, res: Response) => {
   const { jdText } = req.body
-  const jdHash = crypto.createHash('md5').update(jdText).digest('hex')
+  const jdHash = crypto.createHash('sha256').update(jdText).digest('hex')
   const existing = await JDAnalysis.findOne({ userId: req.userId, jdHash })
   if (existing) { sendSuccess(res, existing); return }
 
